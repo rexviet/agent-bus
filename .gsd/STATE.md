@@ -1,28 +1,30 @@
 # STATE.md
 
-> **Current Phase**: 2 - Orchestration Core (planned)
-> **Current Focus**: Planning complete for Phase 2
+> **Current Phase**: 2 - Orchestration Core (completed)
+> **Current Focus**: Phase 2 verified
 > **Last Updated**: 2026-03-09
 
 ## Current Position
-- **Phase**: 2
-- **Task**: Planning complete
-- **Status**: Ready for execution
+- **Phase**: 2 (completed)
+- **Task**: All tasks complete
+- **Status**: Verified
 
 ## Active Work
 - Phase 1.1 completed
 - Phase 1.2 completed
 - Phase 1.3 completed
 - Phase 1.4 completed
-- Phase 2 research completed
-- Phase 2 plans created across 4 waves
+- Phase 2.1 completed
+- Phase 2.2 completed
+- Phase 2.3 completed
+- Phase 2.4 completed
 
 ## Last Session Summary
-Phase 1 executed successfully. Phase 2 is now planned to turn the current foundation into a real orchestration core with durable delivery planning, approval transitions, retry and dead-letter handling, replay, and idempotency protections.
+Phase 2 executed successfully. The runtime now has durable subscriber planning, approval transitions, lease-based delivery control, retry and dead-letter handling, replay services, and end-to-end orchestration verification.
 
 ## Next Steps
-1. `/execute 2`
-2. Begin Phase 2 - Orchestration Core implementation
+1. `/plan 3`
+2. Begin Phase 3 - Runtime Adapters planning
 
 ## Notes
 - Project initialized through `/new-project`.
@@ -31,4 +33,4 @@ Phase 1 executed successfully. Phase 2 is now planned to turn the current founda
 - Plan 1.2 completed with commits `3240c3a`, `7935dce`, and `f4a29f0`.
 - Plan 1.3 completed with commits `8368569`, `1a926c0`, and `b08ea22`.
 - Plan 1.4 completed with commits `e39b675`, `e6e3d31`, and `300b997`.
-- Phase 2 planning assumes deliveries become the durable source of truth for fan-out, approval gates unlock preplanned work, and retry/DLQ/replay operate over delivery lifecycle state.
+- Phase 2 execution completed with commits `8aefba6`, `7babd78`, `1e87746`, `31a930b`, `5cb0d1d`, `a0293c4`, `95c8076`, `a65f3f1`, and `48c3779`.

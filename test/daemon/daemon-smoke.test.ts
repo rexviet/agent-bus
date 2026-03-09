@@ -192,14 +192,17 @@ artifactConventions: []
 
       assert.equal(secondDaemon.runRecoveryScan(), 1);
       assert.equal(notifications.length, 1);
-      assert.deepEqual(notifications[0], {
-        eventId: "550e8400-e29b-41d4-a716-446655440005",
-        topic: "implementation_ready",
-        state: "ready_for_delivery",
-        deliveryId: "delivery:550e8400-e29b-41d4-a716-446655440005:coder_open_code",
-        agentId: "coder_open_code",
-        recordedAt: notifications[0]?.recordedAt
-      });
+      assert.equal(notifications[0]?.eventId, "550e8400-e29b-41d4-a716-446655440005");
+      assert.equal(notifications[0]?.topic, "implementation_ready");
+      assert.equal(notifications[0]?.state, "ready_for_delivery");
+      assert.equal(
+        notifications[0]?.deliveryId,
+        "delivery:550e8400-e29b-41d4-a716-446655440005:coder_open_code"
+      );
+      assert.equal(notifications[0]?.agentId, "coder_open_code");
+      assert.equal(notifications[0]?.deliveryStatus, "ready");
+      assert.equal(notifications[0]?.attemptCount, 0);
+      assert.equal(notifications[0]?.replayCount, 0);
       assert.equal(secondDaemon.dispatcherSnapshot().length, 1);
     } finally {
       await secondDaemon.stop();

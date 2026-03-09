@@ -38,9 +38,15 @@ test("openSqliteDatabase enables WAL and runs migrations idempotently", async ()
         .all()
         .map((row) => ({ id: (row as { id: string }).id }));
 
-      assert.deepEqual(firstRun, ["001_initial.sql"]);
+      assert.deepEqual(firstRun, [
+        "001_initial.sql",
+        "002_orchestration_core.sql"
+      ]);
       assert.deepEqual(secondRun, []);
-      assert.deepEqual(appliedMigrations, [{ id: "001_initial.sql" }]);
+      assert.deepEqual(appliedMigrations, [
+        { id: "001_initial.sql" },
+        { id: "002_orchestration_core.sql" }
+      ]);
     } finally {
       database.close();
     }

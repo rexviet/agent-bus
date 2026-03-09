@@ -4,6 +4,7 @@ import type { AgentBusManifest } from "../config/manifest-schema.js";
 import { loadManifest } from "../config/load-manifest.js";
 import type { EventEnvelope } from "../domain/event-envelope.js";
 import { ensureRuntimeLayout, type RuntimeLayout } from "../shared/runtime-layout.js";
+import { createApprovalStore } from "../storage/approval-store.js";
 import { createDeliveryStore } from "../storage/delivery-store.js";
 import { createEventStore } from "../storage/event-store.js";
 import { migrateDatabase } from "../storage/migrate.js";
@@ -12,10 +13,15 @@ import {
   openSqliteDatabase,
   resolveDefaultDatabasePath
 } from "../storage/sqlite-client.js";
+import { createApprovalService } from "./approval-service.js";
+import { createDeliveryService } from "./delivery-service.js";
 import { createDispatcher, type Dispatcher } from "./dispatcher.js";
 import { publishEvent } from "./publish-event.js";
 import { createRecoveryScan } from "./recovery-scan.js";
+import { createReplayService } from "./replay-service.js";
 import type {
+  ReturnTypeOfCreateApprovalStore,
+  ReturnTypeOfCreateDeliveryStore,
   ReturnTypeOfCreateEventStore,
   ReturnTypeOfCreateRunStore
 } from "./types.js";
@@ -38,8 +44,47 @@ export interface AgentBusDaemon {
   ) => infer Result
     ? Result
     : never;
+  approve(approvalId: string, decidedBy: string): ReturnType<
+    ReturnType<typeof createApprovalService>["approve"]
+  >;
+  reject(
+    approvalId: string,
+    decidedBy: string,
+    feedback?: string
+  ): ReturnType<ReturnType<typeof createApprovalService>["reject"]>;
+  claimDelivery(
+    workerId: string,
+    leaseDurationMs: number,
+    asOf?: string
+  ): ReturnType<ReturnType<typeof createDeliveryService>["claim"]>;
+  acknowledgeDelivery(
+    deliveryId: string,
+    leaseToken: string
+  ): ReturnType<ReturnType<typeof createDeliveryService>["acknowledge"]>;
+  failDelivery(
+    deliveryId: string,
+    leaseToken: string,
+    errorMessage: string,
+    retryDelayMs: number,
+    asOf?: string
+  ): ReturnType<ReturnType<typeof createDeliveryService>["fail"]>;
+  replayDelivery(
+    deliveryId: string,
+    availableAt?: string
+  ): ReturnType<ReturnType<typeof createReplayService>["replayDelivery"]>;
+  replayEvent(
+    eventId: string,
+    availableAt?: string
+  ): ReturnType<ReturnType<typeof createReplayService>["replayEvent"]>;
   runRecoveryScan(): number;
   dispatcherSnapshot(): ReturnType<Dispatcher["snapshot"]>;
+  listPendingApprovals(): ReturnType<ReturnTypeOfCreateApprovalStore["listPendingApprovals"]>;
+  getApprovalForEvent(eventId: string): ReturnType<
+    ReturnTypeOfCreateApprovalStore["getApprovalForEvent"]
+  >;
+  listDeliveriesForEvent(eventId: string): ReturnType<
+    ReturnTypeOfCreateDeliveryStore["listDeliveriesForEvent"]
+  >;
   stop(): Promise<void>;
 }
 
@@ -77,10 +122,27 @@ export async function startDaemon(
   await migrateDatabase(database);
   const runStore = createRunStore(database);
   const eventStore = createEventStore(database);
+  const approvalStore = createApprovalStore(database);
   const deliveryStore = createDeliveryStore(database);
   const dispatcher = createDispatcher();
-  const recoveryScan = createRecoveryScan({
+  const approvalService = createApprovalService({
+    database,
+    approvalStore,
     eventStore,
+    deliveryStore,
+    dispatcher
+  });
+  const deliveryService = createDeliveryService({
+    deliveryStore,
+    dispatcher
+  });
+  const replayService = createReplayService({
+    eventStore,
+    deliveryStore,
+    dispatcher
+  });
+  const recoveryScan = createRecoveryScan({
+    approvalStore,
     deliveryStore,
     dispatcher,
     ...(options.recoveryIntervalMs !== undefined
@@ -127,12 +189,78 @@ export async function startDaemon(
       });
     },
 
+    approve(approvalId: string, decidedBy: string) {
+      return approvalService.approve({
+        approvalId,
+        decidedBy
+      });
+    },
+
+    reject(approvalId: string, decidedBy: string, feedback?: string) {
+      return approvalService.reject({
+        approvalId,
+        decidedBy,
+        ...(feedback ? { feedback } : {})
+      });
+    },
+
+    claimDelivery(workerId: string, leaseDurationMs: number, asOf?: string) {
+      return deliveryService.claim({
+        workerId,
+        leaseDurationMs,
+        ...(asOf ? { asOf } : {})
+      });
+    },
+
+    acknowledgeDelivery(deliveryId: string, leaseToken: string) {
+      return deliveryService.acknowledge(deliveryId, leaseToken);
+    },
+
+    failDelivery(
+      deliveryId: string,
+      leaseToken: string,
+      errorMessage: string,
+      retryDelayMs: number,
+      asOf?: string
+    ) {
+      return deliveryService.fail({
+        deliveryId,
+        leaseToken,
+        errorMessage,
+        retryDelayMs,
+        ...(asOf ? { asOf } : {})
+      });
+    },
+
+    replayDelivery(deliveryId: string, availableAt?: string) {
+      return replayService.replayDelivery(
+        deliveryId,
+        availableAt
+      );
+    },
+
+    replayEvent(eventId: string, availableAt?: string) {
+      return replayService.replayEvent(eventId, availableAt);
+    },
+
     runRecoveryScan() {
       return recoveryScan.runOnce();
     },
 
     dispatcherSnapshot() {
       return dispatcher.snapshot();
+    },
+
+    listPendingApprovals() {
+      return approvalStore.listPendingApprovals();
+    },
+
+    getApprovalForEvent(eventId: string) {
+      return approvalStore.getApprovalForEvent(eventId);
+    },
+
+    listDeliveriesForEvent(eventId: string) {
+      return deliveryStore.listDeliveriesForEvent(eventId);
     },
 
     async stop() {

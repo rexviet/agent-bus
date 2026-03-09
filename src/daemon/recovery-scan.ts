@@ -1,23 +1,32 @@
-import type { ReturnTypeOfCreateDeliveryStore, ReturnTypeOfCreateEventStore } from "./types.js";
+import type {
+  ReturnTypeOfCreateApprovalStore,
+  ReturnTypeOfCreateDeliveryStore
+} from "./types.js";
+import { createDeliveryService } from "./delivery-service.js";
 import type { Dispatcher } from "./dispatcher.js";
 
 export interface RecoveryScanOptions {
-  readonly eventStore: ReturnTypeOfCreateEventStore;
+  readonly approvalStore: ReturnTypeOfCreateApprovalStore;
   readonly deliveryStore: ReturnTypeOfCreateDeliveryStore;
   readonly dispatcher: Dispatcher;
   readonly intervalMs?: number;
 }
 
 export function createRecoveryScan({
-  eventStore,
+  approvalStore,
   deliveryStore,
   dispatcher,
   intervalMs = 15_000
 }: RecoveryScanOptions) {
   let timer: NodeJS.Timeout | null = null;
+  const deliveryService = createDeliveryService({
+    deliveryStore,
+    dispatcher
+  });
 
   function runOnce(): number {
-    const pendingApprovals = eventStore.listPendingApprovals();
+    const pendingApprovals = approvalStore.listPendingApprovals();
+    deliveryService.reclaimExpired();
     const readyDeliveries = deliveryStore.listReadyDeliveries();
 
     for (const approval of pendingApprovals) {

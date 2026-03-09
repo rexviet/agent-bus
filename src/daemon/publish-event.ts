@@ -8,6 +8,7 @@ import type {
 } from "../storage/delivery-store.js";
 import type { PersistedEventRecord } from "../storage/event-store.js";
 import type { Dispatcher } from "./dispatcher.js";
+import { planSubscriptionsForTopic } from "./subscription-planner.js";
 import type {
   ReturnTypeOfCreateDeliveryStore,
   ReturnTypeOfCreateEventStore,
@@ -19,25 +20,6 @@ function approvalRequiredForTopic(
   topic: string
 ): boolean {
   return manifest.approvalGates.some((gate) => gate.topic === topic);
-}
-
-function subscribedAgentIdsForTopic(
-  manifest: AgentBusManifest,
-  topic: string
-): string[] {
-  const agentIds: string[] = [];
-  const seenAgentIds = new Set<string>();
-
-  for (const subscription of manifest.subscriptions) {
-    if (subscription.topic !== topic || seenAgentIds.has(subscription.agentId)) {
-      continue;
-    }
-
-    seenAgentIds.add(subscription.agentId);
-    agentIds.push(subscription.agentId);
-  }
-
-  return agentIds;
 }
 
 export interface PublishEventOptions {
@@ -76,7 +58,7 @@ export function publishEvent({
     approvalStatus === "pending" ? `approval:${envelope.eventId}` : undefined;
   const deliveryStatus: DeliveryStatus =
     approvalStatus === "pending" ? "pending_approval" : "ready";
-  const agentIds = subscribedAgentIdsForTopic(manifest, envelope.topic);
+  const plannedTargets = planSubscriptionsForTopic(manifest, envelope.topic);
 
   database.exec("BEGIN");
 
@@ -96,7 +78,7 @@ export function publishEvent({
       {
         eventId: envelope.eventId,
         topic: envelope.topic,
-        agentIds,
+        agentIds: plannedTargets.map((target) => target.agentId),
         status: deliveryStatus,
         availableAt: persistedEvent.createdAt
       },
