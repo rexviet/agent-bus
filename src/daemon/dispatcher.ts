@@ -1,3 +1,4 @@
+import type { PersistedDeliveryRecord } from "../storage/delivery-store.js";
 import type { PendingApprovalRecord, PersistedEventRecord } from "../storage/event-store.js";
 
 export type DispatchState = "approval_pending" | "ready_for_delivery";
@@ -7,10 +8,15 @@ export interface DispatchNotification {
   readonly topic: string;
   readonly state: DispatchState;
   readonly recordedAt: string;
+  readonly approvalId?: string;
+  readonly deliveryId?: string;
+  readonly agentId?: string;
 }
 
 function createNotificationKey(notification: DispatchNotification): string {
-  return `${notification.state}:${notification.eventId}`;
+  return notification.state === "ready_for_delivery"
+    ? `${notification.state}:${notification.deliveryId ?? notification.eventId}`
+    : `${notification.state}:${notification.eventId}`;
 }
 
 export function createDispatcher() {
@@ -43,6 +49,18 @@ export function createDispatcher() {
         eventId: approval.eventId,
         topic: approval.topic,
         state: "approval_pending",
+        approvalId: approval.approvalId,
+        recordedAt: new Date().toISOString()
+      });
+    },
+
+    handleReadyDelivery(delivery: PersistedDeliveryRecord): DispatchNotification {
+      return recordNotification({
+        eventId: delivery.eventId,
+        topic: delivery.topic,
+        state: "ready_for_delivery",
+        deliveryId: delivery.deliveryId,
+        agentId: delivery.agentId,
         recordedAt: new Date().toISOString()
       });
     },

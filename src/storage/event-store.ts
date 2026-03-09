@@ -34,6 +34,10 @@ export interface InsertEventInput {
   readonly approvalId?: string;
 }
 
+export interface InsertEventOptions {
+  readonly skipTransaction?: boolean;
+}
+
 interface EventRow {
   event_id: string;
   run_id: string;
@@ -182,11 +186,17 @@ export function createEventStore(database: DatabaseSync) {
   `);
 
   return {
-    insertEvent(input: InsertEventInput): PersistedEventRecord {
+    insertEvent(
+      input: InsertEventInput,
+      options: InsertEventOptions = {}
+    ): PersistedEventRecord {
       const approvalStatus = input.approvalStatus ?? "not_required";
       const createdAt = new Date().toISOString();
+      const manageTransaction = options.skipTransaction !== true;
 
-      database.exec("BEGIN");
+      if (manageTransaction) {
+        database.exec("BEGIN");
+      }
 
       try {
         insertEvent.run(
@@ -226,9 +236,13 @@ export function createEventStore(database: DatabaseSync) {
           );
         }
 
-        database.exec("COMMIT");
+        if (manageTransaction) {
+          database.exec("COMMIT");
+        }
       } catch (error) {
-        database.exec("ROLLBACK");
+        if (manageTransaction) {
+          database.exec("ROLLBACK");
+        }
         throw error;
       }
 

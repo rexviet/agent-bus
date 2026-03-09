@@ -70,6 +70,33 @@ artifactConventions: []
   );
 });
 
+test("parseManifestText rejects duplicate agent/topic subscriptions", () => {
+  assert.throws(
+    () =>
+      parseManifestText(`
+version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+agents:
+  - id: planner
+    runtime: codex
+    command: [codex, run]
+subscriptions:
+  - agentId: planner
+    topic: plan_done
+  - agentId: planner
+    topic: plan_done
+approvalGates: []
+artifactConventions: []
+`),
+    (error: unknown) =>
+      error instanceof ManifestValidationError &&
+      error.issues.some((issue) => issue.includes("duplicate agent/topic subscription"))
+  );
+});
+
 test("parseManifestText rejects invalid artifact paths", () => {
   assert.throws(
     () =>
