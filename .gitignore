@@ -1,0 +1,7 @@
+node_modules/
+dist/
+
+.agent-bus/state/*
+.agent-bus/logs/*
+!.agent-bus/state/.gitkeep
+!.agent-bus/logs/.gitkeep
