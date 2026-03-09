@@ -158,3 +158,48 @@ test("approval store records decisions and delivery transitions preserve lifecyc
     }
   });
 });
+
+test("delivery store rejects duplicate planning for the same event and agent", async () => {
+  await withTempDatabase(async (databasePath) => {
+    const database = openSqliteDatabase({ databasePath });
+
+    try {
+      await migrateDatabase(database);
+
+      const runStore = createRunStore(database);
+      const eventStore = createEventStore(database);
+      const deliveryStore = createDeliveryStore(database);
+
+      runStore.createRun({ runId: "run-duplicate-001", status: "active" });
+
+      const persistedEvent = eventStore.insertEvent({
+        envelope: parseEventEnvelope({
+          eventId: "550e8400-e29b-41d4-a716-446655440103",
+          topic: "implementation_ready",
+          runId: "run-duplicate-001",
+          correlationId: "run-duplicate-001",
+          dedupeKey: "implementation_ready:run-duplicate-001",
+          occurredAt: "2026-03-09T16:15:00Z",
+          producer: {
+            agentId: "tech_lead_claude",
+            runtime: "claude-code"
+          },
+          payload: {},
+          payloadMetadata: {},
+          artifactRefs: []
+        })
+      });
+
+      assert.throws(() =>
+        deliveryStore.planDeliveries({
+          eventId: persistedEvent.eventId,
+          topic: persistedEvent.topic,
+          agentIds: ["coder_open_code", "coder_open_code"],
+          status: "ready"
+        })
+      );
+    } finally {
+      database.close();
+    }
+  });
+});
