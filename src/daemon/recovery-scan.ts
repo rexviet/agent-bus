@@ -2,6 +2,7 @@ import type {
   ReturnTypeOfCreateApprovalStore,
   ReturnTypeOfCreateDeliveryStore
 } from "./types.js";
+import { createDeliveryService } from "./delivery-service.js";
 import type { Dispatcher } from "./dispatcher.js";
 
 export interface RecoveryScanOptions {
@@ -18,9 +19,14 @@ export function createRecoveryScan({
   intervalMs = 15_000
 }: RecoveryScanOptions) {
   let timer: NodeJS.Timeout | null = null;
+  const deliveryService = createDeliveryService({
+    deliveryStore,
+    dispatcher
+  });
 
   function runOnce(): number {
     const pendingApprovals = approvalStore.listPendingApprovals();
+    deliveryService.reclaimExpired();
     const readyDeliveries = deliveryStore.listReadyDeliveries();
 
     for (const approval of pendingApprovals) {

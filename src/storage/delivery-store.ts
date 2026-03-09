@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { randomUUID } from "node:crypto";
 
 export type DeliveryStatus =
   | "pending_approval"
@@ -44,6 +45,27 @@ export interface PlanDeliveriesInput {
 
 export interface PlanDeliveriesOptions {
   readonly skipTransaction?: boolean;
+}
+
+export interface ClaimDeliveryInput {
+  readonly workerId: string;
+  readonly leaseDurationMs: number;
+  readonly asOf?: string;
+}
+
+export interface DeliveryMutationOptions {
+  readonly skipTransaction?: boolean;
+}
+
+export interface AcknowledgeDeliveryInput {
+  readonly deliveryId: string;
+  readonly leaseToken: string;
+}
+
+export interface FailDeliveryInput extends AcknowledgeDeliveryInput {
+  readonly errorMessage: string;
+  readonly retryDelayMs: number;
+  readonly asOf?: string;
 }
 
 interface DeliveryRow {
@@ -183,8 +205,167 @@ export function createDeliveryStore(database: DatabaseSync) {
       created_at,
       updated_at
     FROM deliveries
-    WHERE status = 'ready' AND available_at <= ?
+    WHERE status IN ('ready', 'retry_scheduled')
+      AND available_at <= ?
+      AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
     ORDER BY available_at ASC, created_at ASC, delivery_id ASC
+  `);
+  const selectClaimableDelivery = database.prepare(`
+    SELECT
+      delivery_id,
+      event_id,
+      agent_id,
+      topic,
+      status,
+      available_at,
+      attempt_count,
+      max_attempts,
+      lease_token,
+      lease_owner,
+      lease_expires_at,
+      claimed_at,
+      completed_at,
+      last_attempted_at,
+      last_error,
+      dead_lettered_at,
+      dead_letter_reason,
+      replay_count,
+      replayed_from_delivery_id,
+      created_at,
+      updated_at
+    FROM deliveries
+    WHERE status IN ('ready', 'retry_scheduled')
+      AND available_at <= ?
+      AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
+    ORDER BY available_at ASC, created_at ASC, delivery_id ASC
+    LIMIT 1
+  `);
+  const selectDeliveryById = database.prepare(`
+    SELECT
+      delivery_id,
+      event_id,
+      agent_id,
+      topic,
+      status,
+      available_at,
+      attempt_count,
+      max_attempts,
+      lease_token,
+      lease_owner,
+      lease_expires_at,
+      claimed_at,
+      completed_at,
+      last_attempted_at,
+      last_error,
+      dead_lettered_at,
+      dead_letter_reason,
+      replay_count,
+      replayed_from_delivery_id,
+      created_at,
+      updated_at
+    FROM deliveries
+    WHERE delivery_id = ?
+  `);
+  const claimDelivery = database.prepare(`
+    UPDATE deliveries
+    SET status = 'leased',
+        lease_token = ?,
+        lease_owner = ?,
+        lease_expires_at = ?,
+        claimed_at = ?,
+        last_attempted_at = ?,
+        attempt_count = attempt_count + 1,
+        updated_at = ?
+    WHERE delivery_id = ?
+      AND status IN ('ready', 'retry_scheduled')
+      AND available_at <= ?
+      AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
+  `);
+  const acknowledgeDelivery = database.prepare(`
+    UPDATE deliveries
+    SET status = 'completed',
+        lease_token = NULL,
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        completed_at = ?,
+        updated_at = ?,
+        last_error = NULL,
+        dead_lettered_at = NULL,
+        dead_letter_reason = NULL
+    WHERE delivery_id = ? AND status = 'leased' AND lease_token = ?
+  `);
+  const scheduleRetry = database.prepare(`
+    UPDATE deliveries
+    SET status = 'retry_scheduled',
+        available_at = ?,
+        lease_token = NULL,
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        updated_at = ?,
+        last_error = ?,
+        dead_lettered_at = NULL,
+        dead_letter_reason = NULL
+    WHERE delivery_id = ? AND status = 'leased' AND lease_token = ?
+  `);
+  const deadLetterDelivery = database.prepare(`
+    UPDATE deliveries
+    SET status = 'dead_letter',
+        lease_token = NULL,
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        updated_at = ?,
+        last_error = ?,
+        dead_lettered_at = ?,
+        dead_letter_reason = ?
+    WHERE delivery_id = ? AND status = 'leased' AND lease_token = ?
+  `);
+  const selectExpiredLeases = database.prepare(`
+    SELECT
+      delivery_id,
+      event_id,
+      agent_id,
+      topic,
+      status,
+      available_at,
+      attempt_count,
+      max_attempts,
+      lease_token,
+      lease_owner,
+      lease_expires_at,
+      claimed_at,
+      completed_at,
+      last_attempted_at,
+      last_error,
+      dead_lettered_at,
+      dead_letter_reason,
+      replay_count,
+      replayed_from_delivery_id,
+      created_at,
+      updated_at
+    FROM deliveries
+    WHERE status = 'leased' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
+    ORDER BY lease_expires_at ASC, delivery_id ASC
+  `);
+  const reclaimExpiredLease = database.prepare(`
+    UPDATE deliveries
+    SET status = 'ready',
+        lease_token = NULL,
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        available_at = ?,
+        updated_at = ?
+    WHERE delivery_id = ? AND status = 'leased'
+  `);
+  const deadLetterExpiredLease = database.prepare(`
+    UPDATE deliveries
+    SET status = 'dead_letter',
+        lease_token = NULL,
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        updated_at = ?,
+        dead_lettered_at = ?,
+        dead_letter_reason = ?
+    WHERE delivery_id = ? AND status = 'leased'
   `);
   const updateStatusForEvent = database.prepare(`
     UPDATE deliveries
@@ -204,6 +385,18 @@ export function createDeliveryStore(database: DatabaseSync) {
     ): PersistedDeliveryRecord[] {
       if (input.agentIds.length === 0) {
         return [];
+      }
+
+      const duplicateAgentIds = new Set<string>();
+
+      for (const agentId of input.agentIds) {
+        if (duplicateAgentIds.has(agentId)) {
+          throw new Error(
+            `Duplicate delivery planning requested for event ${input.eventId} and agent ${agentId}.`
+          );
+        }
+
+        duplicateAgentIds.add(agentId);
       }
 
       const createdAt = new Date().toISOString();
@@ -250,10 +443,237 @@ export function createDeliveryStore(database: DatabaseSync) {
       return rows.map(mapDeliveryRow);
     },
 
+    getDelivery(deliveryId: string): PersistedDeliveryRecord | null {
+      const row = selectDeliveryById.get(deliveryId) as DeliveryRow | undefined;
+
+      return row ? mapDeliveryRow(row) : null;
+    },
+
     listReadyDeliveries(asOf = new Date().toISOString()): PersistedDeliveryRecord[] {
-      const rows = selectReadyDeliveries.all(asOf) as unknown as DeliveryRow[];
+      const rows = selectReadyDeliveries.all(asOf, asOf) as unknown as DeliveryRow[];
 
       return rows.map(mapDeliveryRow);
+    },
+
+    claimNextDelivery(
+      input: ClaimDeliveryInput,
+      options: DeliveryMutationOptions = {}
+    ): PersistedDeliveryRecord | null {
+      const manageTransaction = options.skipTransaction !== true;
+      const asOf = input.asOf ?? new Date().toISOString();
+      const leaseExpiresAt = new Date(
+        new Date(asOf).getTime() + input.leaseDurationMs
+      ).toISOString();
+
+      if (manageTransaction) {
+        database.exec("BEGIN");
+      }
+
+      try {
+        const claimableRow = selectClaimableDelivery.get(asOf, asOf) as DeliveryRow | undefined;
+
+        if (!claimableRow) {
+          if (manageTransaction) {
+            database.exec("COMMIT");
+          }
+
+          return null;
+        }
+
+        const leaseToken = randomUUID();
+        const result = claimDelivery.run(
+          leaseToken,
+          input.workerId,
+          leaseExpiresAt,
+          asOf,
+          asOf,
+          asOf,
+          claimableRow.delivery_id,
+          asOf,
+          asOf
+        ) as { changes?: number };
+
+        if (!result.changes) {
+          throw new Error(`Failed to claim delivery ${claimableRow.delivery_id}.`);
+        }
+
+        if (manageTransaction) {
+          database.exec("COMMIT");
+        }
+
+        return this.getDelivery(claimableRow.delivery_id);
+      } catch (error) {
+        if (manageTransaction) {
+          database.exec("ROLLBACK");
+        }
+
+        throw error;
+      }
+    },
+
+    acknowledgeDelivery(
+      input: AcknowledgeDeliveryInput,
+      options: DeliveryMutationOptions = {}
+    ): PersistedDeliveryRecord {
+      const manageTransaction = options.skipTransaction !== true;
+
+      if (manageTransaction) {
+        database.exec("BEGIN");
+      }
+
+      try {
+        const completedAt = new Date().toISOString();
+        const result = acknowledgeDelivery.run(
+          completedAt,
+          completedAt,
+          input.deliveryId,
+          input.leaseToken
+        ) as { changes?: number };
+
+        if (!result.changes) {
+          throw new Error(
+            `Active leased delivery not found for ${input.deliveryId} with the provided lease token.`
+          );
+        }
+
+        if (manageTransaction) {
+          database.exec("COMMIT");
+        }
+      } catch (error) {
+        if (manageTransaction) {
+          database.exec("ROLLBACK");
+        }
+
+        throw error;
+      }
+
+      const delivery = this.getDelivery(input.deliveryId);
+
+      if (!delivery) {
+        throw new Error(`Failed to load delivery ${input.deliveryId} after acknowledgement.`);
+      }
+
+      return delivery;
+    },
+
+    failDelivery(
+      input: FailDeliveryInput,
+      options: DeliveryMutationOptions = {}
+    ): PersistedDeliveryRecord {
+      const manageTransaction = options.skipTransaction !== true;
+      const asOf = input.asOf ?? new Date().toISOString();
+
+      if (manageTransaction) {
+        database.exec("BEGIN");
+      }
+
+      try {
+        const currentDelivery = this.getDelivery(input.deliveryId);
+
+        if (!currentDelivery) {
+          throw new Error(`Delivery ${input.deliveryId} not found.`);
+        }
+
+        if (currentDelivery.status !== "leased" || currentDelivery.leaseToken !== input.leaseToken) {
+          throw new Error(
+            `Active leased delivery not found for ${input.deliveryId} with the provided lease token.`
+          );
+        }
+
+        if (currentDelivery.attemptCount >= currentDelivery.maxAttempts) {
+          const result = deadLetterDelivery.run(
+            asOf,
+            input.errorMessage,
+            asOf,
+            input.errorMessage,
+            input.deliveryId,
+            input.leaseToken
+          ) as { changes?: number };
+
+          if (!result.changes) {
+            throw new Error(`Failed to dead-letter delivery ${input.deliveryId}.`);
+          }
+        } else {
+          const retryAt = new Date(
+            new Date(asOf).getTime() + input.retryDelayMs
+          ).toISOString();
+          const result = scheduleRetry.run(
+            retryAt,
+            asOf,
+            input.errorMessage,
+            input.deliveryId,
+            input.leaseToken
+          ) as { changes?: number };
+
+          if (!result.changes) {
+            throw new Error(`Failed to schedule retry for delivery ${input.deliveryId}.`);
+          }
+        }
+
+        if (manageTransaction) {
+          database.exec("COMMIT");
+        }
+      } catch (error) {
+        if (manageTransaction) {
+          database.exec("ROLLBACK");
+        }
+
+        throw error;
+      }
+
+      const delivery = this.getDelivery(input.deliveryId);
+
+      if (!delivery) {
+        throw new Error(`Failed to load delivery ${input.deliveryId} after failure handling.`);
+      }
+
+      return delivery;
+    },
+
+    reclaimExpiredLeases(
+      asOf = new Date().toISOString(),
+      options: DeliveryMutationOptions = {}
+    ): PersistedDeliveryRecord[] {
+      const manageTransaction = options.skipTransaction !== true;
+
+      if (manageTransaction) {
+        database.exec("BEGIN");
+      }
+
+      try {
+        const expiredRows = selectExpiredLeases.all(asOf) as unknown as DeliveryRow[];
+        const updatedAt = new Date().toISOString();
+        const reclaimedIds: string[] = [];
+
+        for (const row of expiredRows) {
+          if (row.attempt_count >= row.max_attempts) {
+            deadLetterExpiredLease.run(
+              updatedAt,
+              updatedAt,
+              row.last_error ?? "Lease expired after exhausting attempts.",
+              row.delivery_id
+            );
+          } else {
+            reclaimExpiredLease.run(asOf, updatedAt, row.delivery_id);
+          }
+
+          reclaimedIds.push(row.delivery_id);
+        }
+
+        if (manageTransaction) {
+          database.exec("COMMIT");
+        }
+
+        return reclaimedIds
+          .map((deliveryId) => this.getDelivery(deliveryId))
+          .filter((delivery): delivery is PersistedDeliveryRecord => delivery !== null);
+      } catch (error) {
+        if (manageTransaction) {
+          database.exec("ROLLBACK");
+        }
+
+        throw error;
+      }
     },
 
     transitionEventDeliveries(

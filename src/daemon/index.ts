@@ -14,6 +14,7 @@ import {
   resolveDefaultDatabasePath
 } from "../storage/sqlite-client.js";
 import { createApprovalService } from "./approval-service.js";
+import { createDeliveryService } from "./delivery-service.js";
 import { createDispatcher, type Dispatcher } from "./dispatcher.js";
 import { publishEvent } from "./publish-event.js";
 import { createRecoveryScan } from "./recovery-scan.js";
@@ -50,6 +51,22 @@ export interface AgentBusDaemon {
     decidedBy: string,
     feedback?: string
   ): ReturnType<ReturnType<typeof createApprovalService>["reject"]>;
+  claimDelivery(
+    workerId: string,
+    leaseDurationMs: number,
+    asOf?: string
+  ): ReturnType<ReturnType<typeof createDeliveryService>["claim"]>;
+  acknowledgeDelivery(
+    deliveryId: string,
+    leaseToken: string
+  ): ReturnType<ReturnType<typeof createDeliveryService>["acknowledge"]>;
+  failDelivery(
+    deliveryId: string,
+    leaseToken: string,
+    errorMessage: string,
+    retryDelayMs: number,
+    asOf?: string
+  ): ReturnType<ReturnType<typeof createDeliveryService>["fail"]>;
   runRecoveryScan(): number;
   dispatcherSnapshot(): ReturnType<Dispatcher["snapshot"]>;
   listPendingApprovals(): ReturnType<ReturnTypeOfCreateApprovalStore["listPendingApprovals"]>;
@@ -99,6 +116,17 @@ export async function startDaemon(
   const approvalStore = createApprovalStore(database);
   const deliveryStore = createDeliveryStore(database);
   const dispatcher = createDispatcher();
+  const approvalService = createApprovalService({
+    database,
+    approvalStore,
+    eventStore,
+    deliveryStore,
+    dispatcher
+  });
+  const deliveryService = createDeliveryService({
+    deliveryStore,
+    dispatcher
+  });
   const recoveryScan = createRecoveryScan({
     approvalStore,
     deliveryStore,
@@ -148,29 +176,45 @@ export async function startDaemon(
     },
 
     approve(approvalId: string, decidedBy: string) {
-      return createApprovalService({
-        database,
-        approvalStore,
-        eventStore,
-        deliveryStore,
-        dispatcher
-      }).approve({
+      return approvalService.approve({
         approvalId,
         decidedBy
       });
     },
 
     reject(approvalId: string, decidedBy: string, feedback?: string) {
-      return createApprovalService({
-        database,
-        approvalStore,
-        eventStore,
-        deliveryStore,
-        dispatcher
-      }).reject({
+      return approvalService.reject({
         approvalId,
         decidedBy,
         ...(feedback ? { feedback } : {})
+      });
+    },
+
+    claimDelivery(workerId: string, leaseDurationMs: number, asOf?: string) {
+      return deliveryService.claim({
+        workerId,
+        leaseDurationMs,
+        ...(asOf ? { asOf } : {})
+      });
+    },
+
+    acknowledgeDelivery(deliveryId: string, leaseToken: string) {
+      return deliveryService.acknowledge(deliveryId, leaseToken);
+    },
+
+    failDelivery(
+      deliveryId: string,
+      leaseToken: string,
+      errorMessage: string,
+      retryDelayMs: number,
+      asOf?: string
+    ) {
+      return deliveryService.fail({
+        deliveryId,
+        leaseToken,
+        errorMessage,
+        retryDelayMs,
+        ...(asOf ? { asOf } : {})
       });
     },
 
