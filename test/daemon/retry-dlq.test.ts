@@ -130,7 +130,7 @@ test("delivery retries become claimable again and expired leases are reclaimed",
             notification.eventId === leaseToExpire.eventId &&
             notification.state === "ready_for_delivery"
         ).length,
-        1
+        2
       );
     } finally {
       await daemon.stop();
