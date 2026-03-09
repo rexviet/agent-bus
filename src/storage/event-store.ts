@@ -38,6 +38,10 @@ export interface InsertEventOptions {
   readonly skipTransaction?: boolean;
 }
 
+export interface UpdateEventApprovalStatusOptions {
+  readonly skipTransaction?: boolean;
+}
+
 interface EventRow {
   event_id: string;
   run_id: string;
@@ -184,6 +188,11 @@ export function createEventStore(database: DatabaseSync) {
     WHERE status = 'pending'
     ORDER BY requested_at ASC
   `);
+  const updateApprovalStatus = database.prepare(`
+    UPDATE events
+    SET approval_status = ?
+    WHERE event_id = ?
+  `);
 
   return {
     insertEvent(
@@ -277,6 +286,40 @@ export function createEventStore(database: DatabaseSync) {
         status: row.status,
         requestedAt: row.requested_at
       }));
+    },
+
+    updateApprovalStatus(
+      eventId: string,
+      approvalStatus: ApprovalStatus,
+      options: UpdateEventApprovalStatusOptions = {}
+    ): PersistedEventRecord {
+      const manageTransaction = options.skipTransaction !== true;
+
+      if (manageTransaction) {
+        database.exec("BEGIN");
+      }
+
+      try {
+        updateApprovalStatus.run(approvalStatus, eventId);
+
+        if (manageTransaction) {
+          database.exec("COMMIT");
+        }
+      } catch (error) {
+        if (manageTransaction) {
+          database.exec("ROLLBACK");
+        }
+
+        throw error;
+      }
+
+      const persisted = this.getEvent(eventId);
+
+      if (!persisted) {
+        throw new Error(`Failed to fetch event ${eventId} after approval status update.`);
+      }
+
+      return persisted;
     }
   };
 }

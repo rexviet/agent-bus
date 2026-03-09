@@ -13,10 +13,13 @@ import {
   openSqliteDatabase,
   resolveDefaultDatabasePath
 } from "../storage/sqlite-client.js";
+import { createApprovalService } from "./approval-service.js";
 import { createDispatcher, type Dispatcher } from "./dispatcher.js";
 import { publishEvent } from "./publish-event.js";
 import { createRecoveryScan } from "./recovery-scan.js";
 import type {
+  ReturnTypeOfCreateApprovalStore,
+  ReturnTypeOfCreateDeliveryStore,
   ReturnTypeOfCreateEventStore,
   ReturnTypeOfCreateRunStore
 } from "./types.js";
@@ -39,8 +42,23 @@ export interface AgentBusDaemon {
   ) => infer Result
     ? Result
     : never;
+  approve(approvalId: string, decidedBy: string): ReturnType<
+    ReturnType<typeof createApprovalService>["approve"]
+  >;
+  reject(
+    approvalId: string,
+    decidedBy: string,
+    feedback?: string
+  ): ReturnType<ReturnType<typeof createApprovalService>["reject"]>;
   runRecoveryScan(): number;
   dispatcherSnapshot(): ReturnType<Dispatcher["snapshot"]>;
+  listPendingApprovals(): ReturnType<ReturnTypeOfCreateApprovalStore["listPendingApprovals"]>;
+  getApprovalForEvent(eventId: string): ReturnType<
+    ReturnTypeOfCreateApprovalStore["getApprovalForEvent"]
+  >;
+  listDeliveriesForEvent(eventId: string): ReturnType<
+    ReturnTypeOfCreateDeliveryStore["listDeliveriesForEvent"]
+  >;
   stop(): Promise<void>;
 }
 
@@ -129,12 +147,51 @@ export async function startDaemon(
       });
     },
 
+    approve(approvalId: string, decidedBy: string) {
+      return createApprovalService({
+        database,
+        approvalStore,
+        eventStore,
+        deliveryStore,
+        dispatcher
+      }).approve({
+        approvalId,
+        decidedBy
+      });
+    },
+
+    reject(approvalId: string, decidedBy: string, feedback?: string) {
+      return createApprovalService({
+        database,
+        approvalStore,
+        eventStore,
+        deliveryStore,
+        dispatcher
+      }).reject({
+        approvalId,
+        decidedBy,
+        ...(feedback ? { feedback } : {})
+      });
+    },
+
     runRecoveryScan() {
       return recoveryScan.runOnce();
     },
 
     dispatcherSnapshot() {
       return dispatcher.snapshot();
+    },
+
+    listPendingApprovals() {
+      return approvalStore.listPendingApprovals();
+    },
+
+    getApprovalForEvent(eventId: string) {
+      return approvalStore.getApprovalForEvent(eventId);
+    },
+
+    listDeliveriesForEvent(eventId: string) {
+      return deliveryStore.listDeliveriesForEvent(eventId);
     },
 
     async stop() {
