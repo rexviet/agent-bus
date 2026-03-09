@@ -11,22 +11,40 @@ const HELP_TEXT = `agent-bus
 
 Usage:
   agent-bus --help
+  agent-bus daemon [--config path] [--exit-after-ready]
   agent-bus layout
   agent-bus layout --ensure
   agent-bus validate-manifest [path]
 
 Commands:
+  daemon         Start the local dispatcher process
   layout          Print resolved runtime directories
   validate-manifest
                  Validate a workflow manifest file
 
 Options:
+  --config        Manifest path to load
   --ensure        Create missing runtime directories before printing them
+  --exit-after-ready
+                 Start the daemon, initialize everything, then exit cleanly
   --help          Show this help output
 `;
 
 function hasFlag(args: readonly string[], flag: string): boolean {
   return args.includes(flag);
+}
+
+function readOptionValue(
+  args: readonly string[],
+  optionName: string
+): string | undefined {
+  const optionIndex = args.indexOf(optionName);
+
+  if (optionIndex === -1) {
+    return undefined;
+  }
+
+  return args[optionIndex + 1];
 }
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
@@ -70,6 +88,27 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 
       throw error;
     }
+  }
+
+  if (command === "daemon") {
+    const { startDaemon } = await import("./daemon/index.js");
+    const configPath = readOptionValue(argv, "--config") ?? "agent-bus.yaml";
+    const exitAfterReady = hasFlag(argv, "--exit-after-ready");
+    const daemon = await startDaemon({
+      configPath: path.resolve(process.cwd(), configPath)
+    });
+
+    process.stdout.write(
+      `Daemon ready\nconfigPath: ${configPath}\ndatabasePath: ${daemon.databasePath}\n`
+    );
+
+    if (exitAfterReady) {
+      await daemon.stop();
+      process.stdout.write("Daemon exited after readiness check\n");
+      return;
+    }
+
+    return;
   }
 
   process.stderr.write(`Unknown command: ${command}\n\n${HELP_TEXT}\n`);

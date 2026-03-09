@@ -18,21 +18,29 @@ export interface RuntimeLayout {
   readonly logsDir: string;
 }
 
-export function createRuntimeLayout(): RuntimeLayout {
-  const repositoryRoot = resolveRepositoryRoot();
-  const internalDir = resolveFromRepositoryRoot(INTERNAL_DIRNAME);
+export interface RuntimeLayoutOptions {
+  readonly repositoryRoot?: string;
+}
+
+export function createRuntimeLayout(
+  options: RuntimeLayoutOptions = {}
+): RuntimeLayout {
+  const repositoryRoot = resolveRepositoryRoot(options);
+  const internalDir = resolveFromRepositoryRoot([INTERNAL_DIRNAME], options);
 
   return {
     repositoryRoot,
-    workspaceDir: resolveFromRepositoryRoot(WORKSPACE_DIRNAME),
+    workspaceDir: resolveFromRepositoryRoot([WORKSPACE_DIRNAME], options),
     internalDir,
-    stateDir: resolveFromRepositoryRoot(INTERNAL_DIRNAME, STATE_DIRNAME),
-    logsDir: resolveFromRepositoryRoot(INTERNAL_DIRNAME, LOGS_DIRNAME)
+    stateDir: resolveFromRepositoryRoot([INTERNAL_DIRNAME, STATE_DIRNAME], options),
+    logsDir: resolveFromRepositoryRoot([INTERNAL_DIRNAME, LOGS_DIRNAME], options)
   };
 }
 
-export async function ensureRuntimeLayout(): Promise<RuntimeLayout> {
-  const layout = createRuntimeLayout();
+export async function ensureRuntimeLayout(
+  options: RuntimeLayoutOptions = {}
+): Promise<RuntimeLayout> {
+  const layout = createRuntimeLayout(options);
 
   await Promise.all([
     mkdir(layout.workspaceDir, { recursive: true }),
@@ -45,10 +53,10 @@ export async function ensureRuntimeLayout(): Promise<RuntimeLayout> {
 
 export function formatRuntimeLayout(layout: RuntimeLayout): string {
   return [
-    `repositoryRoot: ${toRepositoryRelativePath(layout.repositoryRoot)}`,
-    `workspaceDir: ${toRepositoryRelativePath(layout.workspaceDir)}`,
-    `internalDir: ${toRepositoryRelativePath(layout.internalDir)}`,
-    `stateDir: ${toRepositoryRelativePath(layout.stateDir)}`,
-    `logsDir: ${toRepositoryRelativePath(layout.logsDir)}`
+    `repositoryRoot: ${toRepositoryRelativePath(layout.repositoryRoot, { repositoryRoot: layout.repositoryRoot })}`,
+    `workspaceDir: ${toRepositoryRelativePath(layout.workspaceDir, { repositoryRoot: layout.repositoryRoot })}`,
+    `internalDir: ${toRepositoryRelativePath(layout.internalDir, { repositoryRoot: layout.repositoryRoot })}`,
+    `stateDir: ${toRepositoryRelativePath(layout.stateDir, { repositoryRoot: layout.repositoryRoot })}`,
+    `logsDir: ${toRepositoryRelativePath(layout.logsDir, { repositoryRoot: layout.repositoryRoot })}`
   ].join("\n");
 }
