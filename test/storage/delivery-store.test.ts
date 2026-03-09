@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 
+import { createApprovalStore } from "../../src/storage/approval-store.js";
 import { parseEventEnvelope } from "../../src/domain/event-envelope.js";
 import { createDeliveryStore } from "../../src/storage/delivery-store.js";
 import { createEventStore } from "../../src/storage/event-store.js";
@@ -33,6 +34,7 @@ test("delivery store persists ready deliveries for subscribed agents", async () 
 
       const runStore = createRunStore(database);
       const eventStore = createEventStore(database);
+      const approvalStore = createApprovalStore(database);
       const deliveryStore = createDeliveryStore(database);
 
       runStore.createRun({ runId: "run-001", status: "active" });
@@ -71,6 +73,85 @@ test("delivery store persists ready deliveries for subscribed agents", async () 
       assert.deepEqual(
         deliveryStore.listReadyDeliveries(persistedEvent.createdAt).map((delivery) => delivery.deliveryId),
         deliveries.map((delivery) => delivery.deliveryId)
+      );
+      assert.equal(deliveries[0]?.maxAttempts, 3);
+      assert.equal(approvalStore.listPendingApprovals().length, 0);
+    } finally {
+      database.close();
+    }
+  });
+});
+
+test("approval store records decisions and delivery transitions preserve lifecycle metadata", async () => {
+  await withTempDatabase(async (databasePath) => {
+    const database = openSqliteDatabase({ databasePath });
+
+    try {
+      await migrateDatabase(database);
+
+      const runStore = createRunStore(database);
+      const eventStore = createEventStore(database);
+      const approvalStore = createApprovalStore(database);
+      const deliveryStore = createDeliveryStore(database);
+
+      runStore.createRun({ runId: "run-approval-001", status: "active" });
+
+      const persistedEvent = eventStore.insertEvent({
+        envelope: parseEventEnvelope({
+          eventId: "550e8400-e29b-41d4-a716-446655440102",
+          topic: "plan_done",
+          runId: "run-approval-001",
+          correlationId: "run-approval-001",
+          dedupeKey: "plan_done:run-approval-001",
+          occurredAt: "2026-03-09T16:10:00Z",
+          producer: {
+            agentId: "ba_codex",
+            runtime: "codex"
+          },
+          payload: {},
+          payloadMetadata: {},
+          artifactRefs: []
+        }),
+        approvalStatus: "pending"
+      });
+
+      deliveryStore.planDeliveries({
+        eventId: persistedEvent.eventId,
+        topic: persistedEvent.topic,
+        agentIds: ["tech_lead_claude", "qa_antigravity"],
+        status: "pending_approval",
+        availableAt: persistedEvent.createdAt,
+        maxAttempts: 5
+      });
+
+      const pendingApprovals = approvalStore.listPendingApprovals();
+
+      assert.equal(pendingApprovals.length, 1);
+      assert.equal(pendingApprovals[0]?.status, "pending");
+
+      const approved = approvalStore.approve({
+        approvalId: pendingApprovals[0]?.approvalId as string,
+        decidedBy: "human-reviewer"
+      });
+
+      const transitionedDeliveries = deliveryStore.transitionEventDeliveries(
+        persistedEvent.eventId,
+        "pending_approval",
+        "ready",
+        approved.decidedAt
+      );
+
+      assert.equal(approved.status, "approved");
+      assert.equal(approved.decidedBy, "human-reviewer");
+      assert.equal(approvalStore.listPendingApprovals().length, 0);
+      assert.deepEqual(
+        transitionedDeliveries.map((delivery) => delivery.status),
+        ["ready", "ready"]
+      );
+      assert.equal(transitionedDeliveries[0]?.maxAttempts, 5);
+      assert.equal(
+        deliveryStore.listReadyDeliveries(approved.decidedAt).length,
+        transitionedDeliveries.length
       );
     } finally {
       database.close();
