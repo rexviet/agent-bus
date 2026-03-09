@@ -8,6 +8,10 @@ import { test } from "node:test";
 import { startDaemon } from "../../src/daemon/index.js";
 import { parseEventEnvelope } from "../../src/domain/event-envelope.js";
 
+function minutesAfter(timestamp: string, minutes: number): string {
+  return new Date(Date.parse(timestamp) + minutes * 60_000).toISOString();
+}
+
 async function withTempRepo(
   callback: (configPath: string, repositoryRoot: string) => Promise<void>
 ): Promise<void> {
@@ -148,7 +152,7 @@ test("exhausted deliveries transition into dead-letter state", async () => {
     });
 
     try {
-      daemon.publish(
+      const event = daemon.publish(
         parseEventEnvelope({
           eventId: "550e8400-e29b-41d4-a716-446655440303",
           topic: "implementation_ready",
@@ -168,11 +172,9 @@ test("exhausted deliveries transition into dead-letter state", async () => {
 
       let failureResult;
 
-      for (const [index, timestamp] of [
-        "2026-03-09T16:43:00Z",
-        "2026-03-09T16:44:00Z",
-        "2026-03-09T16:45:00Z"
-      ].entries()) {
+      for (const [index, timestamp] of [1, 2, 3].map((minute) =>
+        minutesAfter(event.createdAt, minute)
+      ).entries()) {
         const claimed = daemon.claimDelivery(`worker-${index + 1}`, 60_000, timestamp);
 
         assert.ok(claimed);
@@ -191,9 +193,93 @@ test("exhausted deliveries transition into dead-letter state", async () => {
       assert.equal(failureResult?.deadLetterReason, "failure-3");
       assert.equal(failureResult?.attemptCount, 3);
       assert.equal(
-        daemon.listDeliveriesForEvent("550e8400-e29b-41d4-a716-446655440303")[0]?.status,
+        daemon.listDeliveriesForEvent(event.eventId)[0]?.status,
         "dead_letter"
       );
+    } finally {
+      await daemon.stop();
+    }
+  });
+});
+
+test("replayed dead-letter deliveries start with a fresh retry budget", async () => {
+  await withTempRepo(async (configPath, repositoryRoot) => {
+    const daemon = await startDaemon({
+      configPath,
+      repositoryRoot,
+      registerSignalHandlers: false,
+      recoveryIntervalMs: 5_000
+    });
+
+    try {
+      const event = daemon.publish(
+        parseEventEnvelope({
+          eventId: "550e8400-e29b-41d4-a716-446655440304",
+          topic: "implementation_ready",
+          runId: "run-retry-004",
+          correlationId: "run-retry-004",
+          dedupeKey: "implementation_ready:run-retry-004",
+          occurredAt: "2026-03-09T16:46:00Z",
+          producer: {
+            agentId: "tech_lead_claude",
+            runtime: "claude-code"
+          },
+          payload: {},
+          payloadMetadata: {},
+          artifactRefs: []
+        })
+      );
+
+      for (const [index, timestamp] of [1, 2, 3].map((minute) =>
+        minutesAfter(event.createdAt, minute)
+      ).entries()) {
+        const claimed = daemon.claimDelivery(`worker-${index + 1}`, 60_000, timestamp);
+
+        assert.ok(claimed);
+
+        daemon.failDelivery(
+          claimed?.deliveryId as string,
+          claimed?.leaseToken as string,
+          `failure-${index + 1}`,
+          0,
+          timestamp
+        );
+      }
+
+      const replayed = daemon.replayEvent(
+        event.eventId,
+        minutesAfter(event.createdAt, 4)
+      );
+
+      assert.equal(replayed.deliveries[0]?.status, "ready");
+      assert.equal(replayed.deliveries[0]?.attemptCount, 0);
+      assert.equal(replayed.deliveries[0]?.replayCount, 1);
+      assert.equal(replayed.deliveries[0]?.claimedAt, undefined);
+      assert.equal(replayed.deliveries[0]?.completedAt, undefined);
+      assert.equal(replayed.deliveries[0]?.lastAttemptedAt, undefined);
+      assert.equal(replayed.deliveries[0]?.lastError, undefined);
+      assert.equal(replayed.deliveries[0]?.deadLetterReason, undefined);
+
+      const replayClaim = daemon.claimDelivery(
+        "worker-replay",
+        60_000,
+        minutesAfter(event.createdAt, 4)
+      );
+
+      assert.ok(replayClaim);
+      assert.equal(replayClaim?.attemptCount, 1);
+
+      const retryResult = daemon.failDelivery(
+        replayClaim?.deliveryId as string,
+        replayClaim?.leaseToken as string,
+        "replay-failure",
+        0,
+        minutesAfter(event.createdAt, 4)
+      );
+
+      assert.equal(retryResult.status, "retry_scheduled");
+      assert.equal(retryResult.attemptCount, 1);
+      assert.equal(retryResult.lastError, "replay-failure");
     } finally {
       await daemon.stop();
     }

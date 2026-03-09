@@ -12,6 +12,10 @@ import { migrateDatabase } from "../../src/storage/migrate.js";
 import { createRunStore } from "../../src/storage/run-store.js";
 import { openSqliteDatabase } from "../../src/storage/sqlite-client.js";
 
+function minutesAfter(timestamp: string, minutes: number): string {
+  return new Date(Date.parse(timestamp) + minutes * 60_000).toISOString();
+}
+
 async function withTempDatabase(
   callback: (databasePath: string) => Promise<void>
 ): Promise<void> {
@@ -198,6 +202,85 @@ test("delivery store rejects duplicate planning for the same event and agent", a
           status: "ready"
         })
       );
+    } finally {
+      database.close();
+    }
+  });
+});
+
+test("replay clears terminal execution metadata and resets attempt count", async () => {
+  await withTempDatabase(async (databasePath) => {
+    const database = openSqliteDatabase({ databasePath });
+
+    try {
+      await migrateDatabase(database);
+
+      const runStore = createRunStore(database);
+      const eventStore = createEventStore(database);
+      const deliveryStore = createDeliveryStore(database);
+
+      runStore.createRun({ runId: "run-replay-001", status: "active" });
+
+      const persistedEvent = eventStore.insertEvent({
+        envelope: parseEventEnvelope({
+          eventId: "550e8400-e29b-41d4-a716-446655440104",
+          topic: "implementation_ready",
+          runId: "run-replay-001",
+          correlationId: "run-replay-001",
+          dedupeKey: "implementation_ready:run-replay-001",
+          occurredAt: "2026-03-09T16:20:00Z",
+          producer: {
+            agentId: "tech_lead_claude",
+            runtime: "claude-code"
+          },
+          payload: {},
+          payloadMetadata: {},
+          artifactRefs: []
+        })
+      });
+
+      deliveryStore.planDeliveries({
+        eventId: persistedEvent.eventId,
+        topic: persistedEvent.topic,
+        agentIds: ["coder_open_code"],
+        status: "ready",
+        availableAt: persistedEvent.createdAt
+      });
+
+      const claimed = deliveryStore.claimNextDelivery({
+        workerId: "worker-1",
+        leaseDurationMs: 60_000,
+        asOf: minutesAfter(persistedEvent.createdAt, 1)
+      });
+
+      assert.ok(claimed);
+
+      const completed = deliveryStore.acknowledgeDelivery({
+        deliveryId: claimed?.deliveryId as string,
+        leaseToken: claimed?.leaseToken as string
+      });
+
+      assert.equal(completed.status, "completed");
+      assert.ok(completed.completedAt);
+      assert.ok(completed.claimedAt);
+      assert.ok(completed.lastAttemptedAt);
+
+      const replayed = deliveryStore.replayDelivery({
+        deliveryId: completed.deliveryId,
+        availableAt: minutesAfter(persistedEvent.createdAt, 2)
+      });
+
+      assert.equal(replayed.status, "ready");
+      assert.equal(replayed.availableAt, minutesAfter(persistedEvent.createdAt, 2));
+      assert.equal(replayed.attemptCount, 0);
+      assert.equal(replayed.replayCount, 1);
+      assert.equal(replayed.replayedFromDeliveryId, completed.deliveryId);
+      assert.equal(replayed.claimedAt, undefined);
+      assert.equal(replayed.completedAt, undefined);
+      assert.equal(replayed.lastAttemptedAt, undefined);
+      assert.equal(replayed.lastError, undefined);
+      assert.equal(replayed.deadLetteredAt, undefined);
+      assert.equal(replayed.deadLetterReason, undefined);
     } finally {
       database.close();
     }

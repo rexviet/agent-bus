@@ -97,6 +97,17 @@ interface DeliveryRow {
   updated_at: string;
 }
 
+const replayableDeliveryStatuses: readonly DeliveryStatus[] = [
+  "completed",
+  "dead_letter",
+  "retry_scheduled",
+  "ready"
+];
+
+function isReplayableDeliveryStatus(status: DeliveryStatus): boolean {
+  return replayableDeliveryStatuses.includes(status);
+}
+
 function createDeliveryId(eventId: string, agentId: string): string {
   return `delivery:${eventId}:${agentId}`;
 }
@@ -376,9 +387,13 @@ export function createDeliveryStore(database: DatabaseSync) {
     UPDATE deliveries
     SET status = 'ready',
         available_at = ?,
+        attempt_count = 0,
         lease_token = NULL,
         lease_owner = NULL,
         lease_expires_at = NULL,
+        claimed_at = NULL,
+        completed_at = NULL,
+        last_attempted_at = NULL,
         updated_at = ?,
         last_error = NULL,
         dead_lettered_at = NULL,
@@ -386,7 +401,7 @@ export function createDeliveryStore(database: DatabaseSync) {
         replay_count = replay_count + 1,
         replayed_from_delivery_id = COALESCE(replayed_from_delivery_id, delivery_id)
     WHERE delivery_id = ?
-      AND status IN ('completed', 'cancelled', 'dead_letter', 'retry_scheduled', 'ready')
+      AND status IN ('completed', 'dead_letter', 'retry_scheduled', 'ready')
   `);
   const updateStatusForEvent = database.prepare(`
     UPDATE deliveries
@@ -758,7 +773,7 @@ export function createDeliveryStore(database: DatabaseSync) {
         const replayed: PersistedDeliveryRecord[] = [];
 
         for (const delivery of deliveries) {
-          if (!["completed", "cancelled", "dead_letter", "retry_scheduled", "ready"].includes(delivery.status)) {
+          if (!isReplayableDeliveryStatus(delivery.status)) {
             continue;
           }
 

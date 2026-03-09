@@ -161,11 +161,18 @@ test("orchestration core supports failure dead-letter and replay", async () => {
       assert.equal(replayed.event.eventId, event.eventId);
       assert.equal(replayed.deliveries.length, 1);
       assert.equal(replayed.deliveries[0]?.status, "ready");
+      assert.equal(replayed.deliveries[0]?.attemptCount, 0);
       assert.equal(replayed.deliveries[0]?.replayCount, 1);
+      assert.equal(replayed.deliveries[0]?.claimedAt, undefined);
+      assert.equal(replayed.deliveries[0]?.completedAt, undefined);
+      assert.equal(replayed.deliveries[0]?.lastAttemptedAt, undefined);
+      assert.equal(replayed.deliveries[0]?.lastError, undefined);
+      assert.equal(replayed.deliveries[0]?.deadLetterReason, undefined);
 
       const replayClaim = daemon.claimDelivery("worker-replay", 60_000);
 
       assert.ok(replayClaim);
+      assert.equal(replayClaim?.attemptCount, 1);
       const replayCompleted = daemon.acknowledgeDelivery(
         replayClaim?.deliveryId as string,
         replayClaim?.leaseToken as string
@@ -175,6 +182,69 @@ test("orchestration core supports failure dead-letter and replay", async () => {
       assert.equal(
         daemon.listDeliveriesForEvent(event.eventId)[0]?.status,
         "completed"
+      );
+    } finally {
+      await daemon.stop();
+    }
+  });
+});
+
+test("replay cannot bypass rejected approval gates", async () => {
+  await withTempRepo(async (configPath, repositoryRoot) => {
+    const daemon = await startDaemon({
+      configPath,
+      repositoryRoot,
+      registerSignalHandlers: false,
+      recoveryIntervalMs: 5_000
+    });
+
+    try {
+      const event = daemon.publish(
+        parseEventEnvelope({
+          eventId: "550e8400-e29b-41d4-a716-446655440403",
+          topic: "plan_done",
+          runId: "run-core-003",
+          correlationId: "run-core-003",
+          dedupeKey: "plan_done:run-core-003",
+          occurredAt: "2026-03-09T16:52:00Z",
+          producer: {
+            agentId: "ba_codex",
+            runtime: "codex"
+          },
+          payload: {},
+          payloadMetadata: {},
+          artifactRefs: []
+        })
+      );
+
+      const approval = daemon.getApprovalForEvent(event.eventId);
+
+      assert.ok(approval);
+
+      daemon.reject(approval?.approvalId as string, "human", "Needs rework.");
+
+      const cancelledDelivery = daemon.listDeliveriesForEvent(event.eventId)[0];
+
+      assert.equal(cancelledDelivery?.status, "cancelled");
+      assert.throws(
+        () => daemon.replayEvent(event.eventId),
+        /approved or not_required approval status/
+      );
+      assert.throws(
+        () => daemon.replayDelivery(cancelledDelivery?.deliveryId as string),
+        /approved or not_required approval status/
+      );
+      assert.equal(
+        daemon.dispatcherSnapshot().filter(
+          (notification) =>
+            notification.eventId === event.eventId &&
+            notification.state === "ready_for_delivery"
+        ).length,
+        0
+      );
+      assert.equal(
+        daemon.listDeliveriesForEvent(event.eventId)[0]?.status,
+        "cancelled"
       );
     } finally {
       await daemon.stop();
