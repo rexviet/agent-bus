@@ -1,6 +1,6 @@
 # ROADMAP.md
 
-> **Current Phase**: Not started
+> **Current Phase**: Phase 2 - Orchestration Core
 > **Milestone**: v1.0
 
 ## Must-Haves (from SPEC)
@@ -13,7 +13,7 @@
 ## Phases
 
 ### Phase 1: Foundation
-**Status**: ⬜ Not Started
+**Status**: ✅ Complete
 **Objective**: Define the manifest, event schema, shared workspace conventions, SQLite-backed persistence layer, and local daemon skeleton.
 **Requirements**: REQ-01, REQ-02, REQ-05, REQ-12
 
