@@ -4,6 +4,7 @@ import type { AgentBusManifest } from "../config/manifest-schema.js";
 import { loadManifest } from "../config/load-manifest.js";
 import type { EventEnvelope } from "../domain/event-envelope.js";
 import { ensureRuntimeLayout, type RuntimeLayout } from "../shared/runtime-layout.js";
+import { createApprovalStore } from "../storage/approval-store.js";
 import { createDeliveryStore } from "../storage/delivery-store.js";
 import { createEventStore } from "../storage/event-store.js";
 import { migrateDatabase } from "../storage/migrate.js";
@@ -77,10 +78,11 @@ export async function startDaemon(
   await migrateDatabase(database);
   const runStore = createRunStore(database);
   const eventStore = createEventStore(database);
+  const approvalStore = createApprovalStore(database);
   const deliveryStore = createDeliveryStore(database);
   const dispatcher = createDispatcher();
   const recoveryScan = createRecoveryScan({
-    eventStore,
+    approvalStore,
     deliveryStore,
     dispatcher,
     ...(options.recoveryIntervalMs !== undefined
