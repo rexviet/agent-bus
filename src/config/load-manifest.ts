@@ -31,6 +31,7 @@ function validateManifestRelationships(manifest: AgentBusManifest): string[] {
   const issues: string[] = [];
   const knownAgents = new Set<string>();
   const approvalTopics = new Set<string>();
+  const subscriptionTargets = new Set<string>();
 
   for (const agent of manifest.agents) {
     if (knownAgents.has(agent.id)) {
@@ -41,6 +42,16 @@ function validateManifestRelationships(manifest: AgentBusManifest): string[] {
   }
 
   for (const subscription of manifest.subscriptions) {
+    const subscriptionTarget = `${subscription.agentId}:${subscription.topic}`;
+
+    if (subscriptionTargets.has(subscriptionTarget)) {
+      issues.push(
+        `subscriptions.${subscription.agentId}:${subscription.topic}: duplicate agent/topic subscription.`
+      );
+    }
+
+    subscriptionTargets.add(subscriptionTarget);
+
     if (!knownAgents.has(subscription.agentId)) {
       issues.push(
         `subscriptions.${subscription.agentId}:${subscription.topic}: references unknown agent ID.`

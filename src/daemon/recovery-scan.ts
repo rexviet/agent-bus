@@ -1,14 +1,16 @@
+import type { ReturnTypeOfCreateDeliveryStore, ReturnTypeOfCreateEventStore } from "./types.js";
 import type { Dispatcher } from "./dispatcher.js";
-import type { ReturnTypeOfCreateEventStore } from "./types.js";
 
 export interface RecoveryScanOptions {
   readonly eventStore: ReturnTypeOfCreateEventStore;
+  readonly deliveryStore: ReturnTypeOfCreateDeliveryStore;
   readonly dispatcher: Dispatcher;
   readonly intervalMs?: number;
 }
 
 export function createRecoveryScan({
   eventStore,
+  deliveryStore,
   dispatcher,
   intervalMs = 15_000
 }: RecoveryScanOptions) {
@@ -16,12 +18,17 @@ export function createRecoveryScan({
 
   function runOnce(): number {
     const pendingApprovals = eventStore.listPendingApprovals();
+    const readyDeliveries = deliveryStore.listReadyDeliveries();
 
     for (const approval of pendingApprovals) {
       dispatcher.handlePendingApproval(approval);
     }
 
-    return pendingApprovals.length;
+    for (const delivery of readyDeliveries) {
+      dispatcher.handleReadyDelivery(delivery);
+    }
+
+    return pendingApprovals.length + readyDeliveries.length;
   }
 
   return {

@@ -4,12 +4,13 @@ import type { AgentBusManifest } from "../config/manifest-schema.js";
 import { loadManifest } from "../config/load-manifest.js";
 import type { EventEnvelope } from "../domain/event-envelope.js";
 import { ensureRuntimeLayout, type RuntimeLayout } from "../shared/runtime-layout.js";
+import { createDeliveryStore } from "../storage/delivery-store.js";
 import { createEventStore } from "../storage/event-store.js";
 import { migrateDatabase } from "../storage/migrate.js";
 import { createRunStore } from "../storage/run-store.js";
 import {
-  DEFAULT_DATABASE_FILENAME,
-  openSqliteDatabase
+  openSqliteDatabase,
+  resolveDefaultDatabasePath
 } from "../storage/sqlite-client.js";
 import { createDispatcher, type Dispatcher } from "./dispatcher.js";
 import { publishEvent } from "./publish-event.js";
@@ -62,16 +63,25 @@ export async function startDaemon(
   const absoluteConfigPath = path.resolve(options.configPath);
   const repositoryRoot = options.repositoryRoot ?? path.dirname(absoluteConfigPath);
   const manifest = await loadManifest(absoluteConfigPath);
-  const layout = await ensureRuntimeLayout({ repositoryRoot });
+  const layout = await ensureRuntimeLayout({
+    repositoryRoot,
+    workspace: manifest.workspace
+  });
   const databasePath =
-    options.databasePath ?? path.resolve(layout.stateDir, DEFAULT_DATABASE_FILENAME);
+    options.databasePath ??
+    resolveDefaultDatabasePath({
+      repositoryRoot,
+      workspace: manifest.workspace
+    });
   const database = openSqliteDatabase({ databasePath });
-  const appliedMigrations = await migrateDatabase(database);
+  await migrateDatabase(database);
   const runStore = createRunStore(database);
   const eventStore = createEventStore(database);
+  const deliveryStore = createDeliveryStore(database);
   const dispatcher = createDispatcher();
   const recoveryScan = createRecoveryScan({
     eventStore,
+    deliveryStore,
     dispatcher,
     ...(options.recoveryIntervalMs !== undefined
       ? { intervalMs: options.recoveryIntervalMs }
@@ -107,9 +117,11 @@ export async function startDaemon(
 
     publish(envelope: EventEnvelope) {
       return publishEvent({
+        database,
         manifest,
         runStore,
         eventStore,
+        deliveryStore,
         dispatcher,
         envelope
       });

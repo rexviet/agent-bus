@@ -12,8 +12,7 @@ const HELP_TEXT = `agent-bus
 Usage:
   agent-bus --help
   agent-bus daemon [--config path] [--exit-after-ready]
-  agent-bus layout
-  agent-bus layout --ensure
+  agent-bus layout [--config path] [--ensure]
   agent-bus validate-manifest [path]
 
 Commands:
@@ -56,9 +55,19 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   const [command] = argv;
 
   if (command === "layout") {
+    const configPath = readOptionValue(argv, "--config") ?? "agent-bus.yaml";
+    const absoluteConfigPath = path.resolve(process.cwd(), configPath);
+    const manifest = await loadManifest(absoluteConfigPath);
+    const repositoryRoot = path.dirname(absoluteConfigPath);
     const layout = hasFlag(argv, "--ensure")
-      ? await ensureRuntimeLayout()
-      : createRuntimeLayout();
+      ? await ensureRuntimeLayout({
+          repositoryRoot,
+          workspace: manifest.workspace
+        })
+      : createRuntimeLayout({
+          repositoryRoot,
+          workspace: manifest.workspace
+        });
 
     process.stdout.write(`${formatRuntimeLayout(layout)}\n`);
     return;
