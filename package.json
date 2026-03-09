@@ -1,0 +1,25 @@
+{
+  "name": "agent-bus",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-first event-driven orchestration runtime for AI agents.",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node --input-type=module -e \"import { cpSync, existsSync } from 'node:fs'; if (existsSync('dist/src')) { cpSync('dist/src', 'dist', { recursive: true, force: true }); } if (existsSync('src/storage/migrations')) { cpSync('src/storage/migrations', 'dist/src/storage/migrations', { recursive: true, force: true }); cpSync('src/storage/migrations', 'dist/storage/migrations', { recursive: true, force: true }); }\"",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run build && node --experimental-sqlite --test dist/test/**/*.test.js",
+    "start": "node --experimental-sqlite dist/cli.js",
+    "daemon": "node --experimental-sqlite dist/cli.js daemon"
+  },
+  "dependencies": {
+    "yaml": "^2.8.2",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "typescript": "^5.9.3"
+  }
+}
