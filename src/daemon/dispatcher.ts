@@ -11,11 +11,19 @@ export interface DispatchNotification {
   readonly approvalId?: string;
   readonly deliveryId?: string;
   readonly agentId?: string;
+  readonly deliveryStatus?: PersistedDeliveryRecord["status"];
+  readonly attemptCount?: number;
+  readonly replayCount?: number;
+  readonly availableAt?: string;
 }
 
 function createNotificationKey(notification: DispatchNotification): string {
   return notification.state === "ready_for_delivery"
-    ? `${notification.state}:${notification.deliveryId ?? notification.eventId}`
+    ? `${notification.state}:${notification.deliveryId ?? notification.eventId}:${
+        notification.deliveryStatus ?? "unknown"
+      }:${notification.attemptCount ?? 0}:${notification.replayCount ?? 0}:${
+        notification.availableAt ?? "unknown"
+      }`
     : `${notification.state}:${notification.eventId}`;
 }
 
@@ -61,6 +69,10 @@ export function createDispatcher() {
         state: "ready_for_delivery",
         deliveryId: delivery.deliveryId,
         agentId: delivery.agentId,
+        deliveryStatus: delivery.status,
+        attemptCount: delivery.attemptCount,
+        replayCount: delivery.replayCount,
+        availableAt: delivery.availableAt,
         recordedAt: new Date().toISOString()
       });
     },

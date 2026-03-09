@@ -18,6 +18,7 @@ import { createDeliveryService } from "./delivery-service.js";
 import { createDispatcher, type Dispatcher } from "./dispatcher.js";
 import { publishEvent } from "./publish-event.js";
 import { createRecoveryScan } from "./recovery-scan.js";
+import { createReplayService } from "./replay-service.js";
 import type {
   ReturnTypeOfCreateApprovalStore,
   ReturnTypeOfCreateDeliveryStore,
@@ -67,6 +68,14 @@ export interface AgentBusDaemon {
     retryDelayMs: number,
     asOf?: string
   ): ReturnType<ReturnType<typeof createDeliveryService>["fail"]>;
+  replayDelivery(
+    deliveryId: string,
+    availableAt?: string
+  ): ReturnType<ReturnType<typeof createReplayService>["replayDelivery"]>;
+  replayEvent(
+    eventId: string,
+    availableAt?: string
+  ): ReturnType<ReturnType<typeof createReplayService>["replayEvent"]>;
   runRecoveryScan(): number;
   dispatcherSnapshot(): ReturnType<Dispatcher["snapshot"]>;
   listPendingApprovals(): ReturnType<ReturnTypeOfCreateApprovalStore["listPendingApprovals"]>;
@@ -124,6 +133,11 @@ export async function startDaemon(
     dispatcher
   });
   const deliveryService = createDeliveryService({
+    deliveryStore,
+    dispatcher
+  });
+  const replayService = createReplayService({
+    eventStore,
     deliveryStore,
     dispatcher
   });
@@ -216,6 +230,17 @@ export async function startDaemon(
         retryDelayMs,
         ...(asOf ? { asOf } : {})
       });
+    },
+
+    replayDelivery(deliveryId: string, availableAt?: string) {
+      return replayService.replayDelivery(
+        deliveryId,
+        availableAt
+      );
+    },
+
+    replayEvent(eventId: string, availableAt?: string) {
+      return replayService.replayEvent(eventId, availableAt);
     },
 
     runRecoveryScan() {

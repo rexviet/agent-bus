@@ -68,6 +68,11 @@ export interface FailDeliveryInput extends AcknowledgeDeliveryInput {
   readonly asOf?: string;
 }
 
+export interface ReplayDeliveryInput {
+  readonly deliveryId: string;
+  readonly availableAt?: string;
+}
+
 interface DeliveryRow {
   delivery_id: string;
   event_id: string;
@@ -366,6 +371,22 @@ export function createDeliveryStore(database: DatabaseSync) {
         dead_lettered_at = ?,
         dead_letter_reason = ?
     WHERE delivery_id = ? AND status = 'leased'
+  `);
+  const replayDelivery = database.prepare(`
+    UPDATE deliveries
+    SET status = 'ready',
+        available_at = ?,
+        lease_token = NULL,
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        updated_at = ?,
+        last_error = NULL,
+        dead_lettered_at = NULL,
+        dead_letter_reason = NULL,
+        replay_count = replay_count + 1,
+        replayed_from_delivery_id = COALESCE(replayed_from_delivery_id, delivery_id)
+    WHERE delivery_id = ?
+      AND status IN ('completed', 'cancelled', 'dead_letter', 'retry_scheduled', 'ready')
   `);
   const updateStatusForEvent = database.prepare(`
     UPDATE deliveries
@@ -667,6 +688,96 @@ export function createDeliveryStore(database: DatabaseSync) {
         return reclaimedIds
           .map((deliveryId) => this.getDelivery(deliveryId))
           .filter((delivery): delivery is PersistedDeliveryRecord => delivery !== null);
+      } catch (error) {
+        if (manageTransaction) {
+          database.exec("ROLLBACK");
+        }
+
+        throw error;
+      }
+    },
+
+    replayDelivery(
+      input: ReplayDeliveryInput,
+      options: DeliveryMutationOptions = {}
+    ): PersistedDeliveryRecord {
+      const manageTransaction = options.skipTransaction !== true;
+      const availableAt = input.availableAt ?? new Date().toISOString();
+
+      if (manageTransaction) {
+        database.exec("BEGIN");
+      }
+
+      try {
+        const updatedAt = new Date().toISOString();
+        const result = replayDelivery.run(
+          availableAt,
+          updatedAt,
+          input.deliveryId
+        ) as { changes?: number };
+
+        if (!result.changes) {
+          throw new Error(
+            `Replay requires a terminal or retryable delivery state for ${input.deliveryId}.`
+          );
+        }
+
+        if (manageTransaction) {
+          database.exec("COMMIT");
+        }
+      } catch (error) {
+        if (manageTransaction) {
+          database.exec("ROLLBACK");
+        }
+
+        throw error;
+      }
+
+      const delivery = this.getDelivery(input.deliveryId);
+
+      if (!delivery) {
+        throw new Error(`Failed to load delivery ${input.deliveryId} after replay.`);
+      }
+
+      return delivery;
+    },
+
+    replayEventDeliveries(
+      eventId: string,
+      availableAt?: string,
+      options: DeliveryMutationOptions = {}
+    ): PersistedDeliveryRecord[] {
+      const manageTransaction = options.skipTransaction !== true;
+
+      if (manageTransaction) {
+        database.exec("BEGIN");
+      }
+
+      try {
+        const deliveries = this.listDeliveriesForEvent(eventId);
+        const replayed: PersistedDeliveryRecord[] = [];
+
+        for (const delivery of deliveries) {
+          if (!["completed", "cancelled", "dead_letter", "retry_scheduled", "ready"].includes(delivery.status)) {
+            continue;
+          }
+
+          replayed.push(
+            this.replayDelivery(
+              {
+                deliveryId: delivery.deliveryId,
+                ...(availableAt ? { availableAt } : {})
+              },
+              { skipTransaction: true }
+            )
+          );
+        }
+
+        if (manageTransaction) {
+          database.exec("COMMIT");
+        }
+
+        return replayed;
       } catch (error) {
         if (manageTransaction) {
           database.exec("ROLLBACK");
