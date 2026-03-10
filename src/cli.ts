@@ -19,6 +19,8 @@ Usage:
   agent-bus runs <subcommand>
   agent-bus approvals <subcommand>
   agent-bus failures <subcommand>
+  agent-bus replay <target>
+  agent-bus publish --envelope <file>
 
 Commands:
   daemon         Start the local dispatcher process
@@ -28,6 +30,8 @@ Commands:
   runs           Inspect recent runs and run details
   approvals      List pending approval work
   failures       Inspect retry-scheduled and dead-letter deliveries
+  replay         Replay an event or delivery
+  publish        Publish an event envelope from disk
 
 Options:
   --config        Manifest path to load
@@ -140,7 +144,7 @@ export async function main(
     return 0;
   }
 
-  if (command && ["runs", "approvals", "failures"].includes(command)) {
+  if (command && ["runs", "approvals", "failures", "replay", "publish"].includes(command)) {
     return runOperatorCommand(argv, {
       cwd,
       stdout,

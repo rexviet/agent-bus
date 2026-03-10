@@ -150,3 +150,100 @@ export function writeFailureDeliveriesText(
     );
   }
 }
+
+export function writeApprovalDecisionText(
+  stream: WritableTextStream,
+  result: {
+    readonly approval: {
+      readonly approvalId: string;
+      readonly status: string;
+      readonly decidedBy?: string;
+      readonly feedback?: string;
+    };
+    readonly event: {
+      readonly eventId: string;
+      readonly runId: string;
+      readonly approvalStatus: string;
+    };
+    readonly deliveries: readonly {
+      readonly deliveryId: string;
+      readonly status: string;
+    }[];
+  }
+): void {
+  writeLine(stream, `Approval ${result.approval.approvalId}`);
+  writeLine(stream, `status: ${result.approval.status}`);
+  writeLine(stream, `eventId: ${result.event.eventId}`);
+  writeLine(stream, `runId: ${result.event.runId}`);
+  writeLine(stream, `approvalStatus: ${result.event.approvalStatus}`);
+
+  if (result.approval.decidedBy) {
+    writeLine(stream, `decidedBy: ${result.approval.decidedBy}`);
+  }
+
+  if (result.approval.feedback) {
+    writeLine(stream, `feedback: ${result.approval.feedback}`);
+  }
+
+  writeLine(stream, `deliveries: ${result.deliveries.length}`);
+
+  for (const delivery of result.deliveries) {
+    writeLine(stream, `- ${delivery.deliveryId} status=${delivery.status}`);
+  }
+}
+
+export function writeReplayResultText(
+  stream: WritableTextStream,
+  result:
+    | {
+        readonly event: {
+          readonly eventId: string;
+          readonly runId: string;
+        };
+        readonly deliveries: readonly {
+          readonly deliveryId: string;
+          readonly status: string;
+          readonly replayCount: number;
+        }[];
+      }
+    | {
+        readonly deliveryId: string;
+        readonly eventId: string;
+        readonly status: string;
+        readonly replayCount: number;
+      }
+): void {
+  if ("deliveryId" in result) {
+    writeLine(stream, `Replayed delivery ${result.deliveryId}`);
+    writeLine(stream, `eventId: ${result.eventId}`);
+    writeLine(stream, `status: ${result.status}`);
+    writeLine(stream, `replayCount: ${result.replayCount}`);
+    return;
+  }
+
+  writeLine(stream, `Replayed event ${result.event.eventId}`);
+  writeLine(stream, `runId: ${result.event.runId}`);
+  writeLine(stream, `deliveries: ${result.deliveries.length}`);
+
+  for (const delivery of result.deliveries) {
+    writeLine(
+      stream,
+      `- ${delivery.deliveryId} status=${delivery.status} replay=${delivery.replayCount}`
+    );
+  }
+}
+
+export function writePublishedEventText(
+  stream: WritableTextStream,
+  event: {
+    readonly eventId: string;
+    readonly runId: string;
+    readonly topic: string;
+    readonly approvalStatus: string;
+  }
+): void {
+  writeLine(stream, `Published event ${event.eventId}`);
+  writeLine(stream, `runId: ${event.runId}`);
+  writeLine(stream, `topic: ${event.topic}`);
+  writeLine(stream, `approvalStatus: ${event.approvalStatus}`);
+}
