@@ -16,6 +16,10 @@ export interface CreateRunInput {
   readonly metadata?: Record<string, unknown>;
 }
 
+export interface ListRunsOptions {
+  readonly limit?: number;
+}
+
 interface RunRow {
   run_id: string;
   status: RunStatus;
@@ -44,6 +48,12 @@ export function createRunStore(database: DatabaseSync) {
     FROM runs
     WHERE run_id = ?
   `);
+  const selectRuns = database.prepare(`
+    SELECT run_id, status, metadata_json, created_at, updated_at
+    FROM runs
+    ORDER BY created_at DESC, run_id DESC
+    LIMIT ?
+  `);
 
   return {
     createRun(input: CreateRunInput): RunRecord {
@@ -66,6 +76,13 @@ export function createRunStore(database: DatabaseSync) {
       const row = selectRun.get(runId) as RunRow | undefined;
 
       return row ? mapRunRow(row) : null;
+    },
+
+    listRuns(options: ListRunsOptions = {}): RunRecord[] {
+      const limit = options.limit ?? 20;
+      const rows = selectRuns.all(limit) as unknown as RunRow[];
+
+      return rows.map(mapRunRow);
     }
   };
 }

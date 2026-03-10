@@ -176,6 +176,26 @@ export function createEventStore(database: DatabaseSync) {
     FROM events
     WHERE event_id = ?
   `);
+  const selectEventsByRun = database.prepare(`
+    SELECT
+      event_id,
+      run_id,
+      topic,
+      correlation_id,
+      causation_id,
+      dedupe_key,
+      approval_status,
+      producer_agent_id,
+      producer_runtime,
+      producer_model,
+      payload_json,
+      payload_metadata_json,
+      occurred_at,
+      created_at
+    FROM events
+    WHERE run_id = ?
+    ORDER BY occurred_at ASC, created_at ASC, event_id ASC
+  `);
   const selectArtifacts = database.prepare(`
     SELECT path, role, description, media_type
     FROM event_artifacts
@@ -274,6 +294,16 @@ export function createEventStore(database: DatabaseSync) {
       const artifactRows = selectArtifacts.all(eventId) as unknown as EventArtifactRow[];
 
       return mapPersistedEvent(eventRow, artifactRows);
+    },
+
+    listEventsForRun(runId: string): PersistedEventRecord[] {
+      const eventRows = selectEventsByRun.all(runId) as unknown as EventRow[];
+
+      return eventRows.map((eventRow) => {
+        const artifactRows = selectArtifacts.all(eventRow.event_id) as unknown as EventArtifactRow[];
+
+        return mapPersistedEvent(eventRow, artifactRows);
+      });
     },
 
     listPendingApprovals(): PendingApprovalRecord[] {
