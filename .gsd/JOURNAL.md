@@ -2,6 +2,32 @@
 
 ## Entries
 
+## Session: 2026-03-10 13:54
+
+### Objective
+Execute Phase 3 runtime-adapter plans, verify the phase goal, and leave the repo ready for Phase 4 planning.
+
+### Accomplished
+- Merged the Phase 3 planning PR, synced local `main`, and started a fresh execution branch for runtime adapter work.
+- Executed all 4 Phase 3 plans and completed 12 tasks across the shared adapter contract, daemon worker execution, vendor-specific builders, and end-to-end runtime coverage.
+- Added the file-backed adapter contract, local process runner, daemon worker loop, and an immediate dead-letter path for fatal adapter failures.
+- Implemented Codex, Open Code, and Antigravity command builders and updated the shipped manifests to current runtime command shapes.
+- Wrote `.gsd/phases/3/VERIFICATION.md`, updated roadmap/state, and closed Phase 3 as complete.
+
+### Verification
+- [x] `npm run typecheck` passed on Node `22.12.0`
+- [x] `npm test` passed with `45/45` tests
+- [x] `npm run build && node --experimental-sqlite dist/cli.js validate-manifest agent-bus.example.yaml && node --experimental-sqlite dist/cli.js validate-manifest agent-bus.yaml` passed
+- [x] REQ-10 verified in `.gsd/phases/3/VERIFICATION.md`
+- [x] REQ-12 verified in `.gsd/phases/3/VERIFICATION.md`
+- [ ] Phase 4 planning started
+
+### Paused Because
+Phase 3 is complete and the next meaningful step is `/plan 4` for operator workflow and CLI coverage.
+
+### Handoff Notes
+The runtime control plane is now file-backed: the daemon writes a work package, executes a local adapter command, and reads a result envelope back from disk. Fatal adapter failures dead-letter immediately, retryable failures reschedule, and vendor-specific command shaping is isolated under `src/adapters/vendors/`. The shipped manifests now reflect real `codex exec`, `opencode run`, and `antigravity chat --mode agent` command shapes.
+
 ## Session: 2026-03-10 11:04
 
 ### Objective
