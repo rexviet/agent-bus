@@ -1,13 +1,13 @@
 # STATE.md
 
-> **Current Phase**: 4 - Operator Workflow
-> **Current Focus**: Phase 4 planning is complete; execution should start with Plan 4.1
+> **Current Phase**: 4 - Operator Workflow (completed)
+> **Current Focus**: Phase 4 executed and verified on `feature/phase-4-operator-workflow`; awaiting PR review
 > **Last Updated**: 2026-03-10
 
 ## Current Position
-- **Phase**: 4 - Operator Workflow
-- **Task**: Planning complete
-- **Status**: Ready for execution at 2026-03-10 14:48 +07
+- **Phase**: 4 - Operator Workflow (completed)
+- **Task**: All plans complete
+- **Status**: Verified at 2026-03-10 15:15 +07
 
 ## Active Work
 - Phase 1.1 completed
@@ -26,19 +26,20 @@
 - Phase 3 verification completed
 - Phase 3 merged to `main`
 - Phase 4 research completed
-- Phase 4.1 planned
-- Phase 4.2 planned
-- Phase 4.3 planned
-- Phase 4.4 planned
+- Phase 4.1 completed
+- Phase 4.2 completed
+- Phase 4.3 completed
+- Phase 4.4 completed
+- Phase 4 verification completed
 
 ## Last Session Summary
-Phase 4 is now decomposed into four execution plans on branch `feature/phase-4-planning`. The phase will start by building daemon-owned operator read models, then layer read-only CLI commands, mutating operator commands plus a publish bootstrap, and finally a deterministic end-to-end operator demo.
+Phase 4 is complete on branch `feature/phase-4-operator-workflow`. The repository now has daemon-backed operator read models, CLI commands for run inspection, approvals, failures, replay, and file-backed publish, plus a deterministic end-to-end operator demo and verification suite.
 
 ## In-Progress Work
-No product code is currently in progress.
-- Branch: `feature/phase-4-planning`
-- Files modified: `.gsd/phases/4/*`, `.gsd/STATE.md`, `.gsd/JOURNAL.md`
-- Tests status: Planning-only turn; no npm verification commands were run after Phase 3 merge
+Product code for Phase 4 is complete and verified.
+- Branch: `feature/phase-4-operator-workflow`
+- Files modified: CLI/operator surface, demo assets, `.gsd/phases/4/*`, `.gsd/ROADMAP.md`, `.gsd/STATE.md`, `.gsd/JOURNAL.md`
+- Tests status: `npm test` passed on Node `22.12.0` with `57/57` tests; manifest validation passed for `agent-bus.example.yaml`, `agent-bus.yaml`, and `examples/operator-demo/agent-bus.demo.yaml`
 
 ## Blockers
 No active implementation blocker.
@@ -60,6 +61,7 @@ Critical context that would be lost:
 - Phase 4 run visibility should derive summary state from persisted events and deliveries instead of relying on the currently static `runs.status` field.
 - Phase 4 operator commands should support both concise text output and `--json`, with a thin `publish --envelope` bootstrap instead of a flag-heavy event builder.
 - Phase 4 demo verification should use deterministic fixture agents and generic manifest commands, not authenticated external runtimes.
+- Nested `--config` paths must still resolve workspace and state directories relative to the caller's repository root, not the config file's parent directory.
 
 ### Approaches Tried
 - Froze the shared adapter contract first with schema and path-safety tests before wiring any runtime execution.
@@ -70,28 +72,24 @@ Critical context that would be lost:
 - Re-reviewed the Phase 3 branch after fixing the lease-expiry race and publish-before-ack bug; no remaining blocking findings were found before PR `#6` was merged.
 
 ### Current Hypothesis
-The next highest-value step is `/execute 4`, starting with Plan 4.1 so the operator read models and daemon inspection boundary exist before any CLI command surface is added.
+The implementation work is done; the next step is to review and merge the Phase 4 execution PR after CI passes.
 
 ### Files of Interest
+- `.gsd/phases/4/VERIFICATION.md`: Phase 4 requirement verification and closing evidence.
 - `.gsd/phases/4/RESEARCH.md`: Phase 4 design decisions and operator-surface constraints.
 - `.gsd/phases/4/01-PLAN.md`: read-model and daemon operator-service work.
 - `.gsd/phases/4/02-PLAN.md`: read-only operator CLI commands.
 - `.gsd/phases/4/03-PLAN.md`: approval, rejection, replay, and publish bootstrap CLI commands.
 - `.gsd/phases/4/04-PLAN.md`: deterministic end-to-end operator demo workflow.
-- `.gsd/phases/3/VERIFICATION.md`: Phase 3 requirement verification and closing evidence.
-- `.gsd/phases/3/RESEARCH.md`: Phase 3 runtime constraints and command-surface decisions that still shape Phase 4.
-- `src/adapters/contract.ts`: shared file-backed work package and result envelope contract.
-- `src/adapters/process-runner.ts`: local command execution and result-envelope loading.
-- `src/daemon/adapter-worker.ts`: daemon-owned claim -> execute -> republish -> ack/fail loop.
-- `src/adapters/registry.ts`: runtime registry plus vendor-builder dispatch and generic fallback.
-- `src/adapters/vendors/codex.ts`, `src/adapters/vendors/open-code.ts`, `src/adapters/vendors/antigravity.ts`: runtime-specific command builders.
-- `test/daemon/adapter-worker.test.ts`: deterministic fixture coverage for success, retry, and fatal runtime paths.
-- `test/daemon/runtime-adapters.e2e.test.ts`: local end-to-end runtime handoff across codex, open-code, and antigravity identities.
+- `src/daemon/operator-service.ts`: daemon-owned operator read models for runs, approvals, and failures.
+- `src/cli.ts`, `src/cli/operator-command.ts`, `src/cli/output.ts`, `src/cli/load-envelope.ts`: the Phase 4 operator CLI surface.
+- `examples/operator-demo/agent-bus.demo.yaml`: deterministic demo manifest.
+- `test/cli/operator-read.test.ts`, `test/cli/operator-mutate.test.ts`, `test/cli/operator-workflow.e2e.test.ts`: CLI-level verification for read, mutate, and end-to-end operator workflows.
 
 ## Next Steps
-1. `/execute 4`
-2. Start with Plan 4.1 to build operator read models and the daemon inspection surface
-3. Keep Node `22.12.0` pinned before any npm command and decide later whether to codify that with `.nvmrc` or Volta
+1. Review the Phase 4 execution PR and CI results
+2. Merge after approval
+3. Decide whether to codify Node `22.12.0` with `.nvmrc` or Volta
 
 ## Notes
 - Project initialized through `/new-project`.

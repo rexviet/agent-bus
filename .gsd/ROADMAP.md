@@ -1,6 +1,6 @@
 # ROADMAP.md
 
-> **Current Phase**: Phase 4 - Operator Workflow
+> **Current Phase**: Complete
 > **Milestone**: v1.0
 
 ## Must-Haves (from SPEC)
@@ -8,7 +8,7 @@
 - [x] Durable event store with approval, retry, dead-letter handling, and replay
 - [x] Shared workspace artifact handoff by relative path
 - [x] Runtime adapter contract for Antigravity, Open Code, and Codex
-- [ ] CLI operations for run inspection and approval workflow
+- [x] CLI operations for run inspection and approval workflow
 
 ## Phases
 
@@ -28,6 +28,6 @@
 **Requirements**: REQ-10, REQ-12
 
 ### Phase 4: Operator Workflow
-**Status**: ⬜ Not Started
+**Status**: ✅ Complete
 **Objective**: Build the CLI surface for run visibility, approvals, rejection feedback, failure inspection, replay, and an end-to-end demo workflow.
 **Requirements**: REQ-11, REQ-03, REQ-04, REQ-08
