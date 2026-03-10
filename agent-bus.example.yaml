@@ -10,9 +10,7 @@ agents:
     description: Business analyst and planning agent running in Codex.
     command:
       - codex
-      - run
-      - --mode
-      - plan
+      - exec
   - id: tech_lead_claude
     runtime: claude-code
     description: System design agent running in Claude Code.
@@ -26,17 +24,15 @@ agents:
     description: QA agent producing acceptance tests and test cases.
     command:
       - antigravity
-      - run
+      - chat
       - --mode
-      - qa
+      - agent
   - id: coder_open_code
     runtime: open-code
     description: Implementation agent running in Open Code with a local model.
     command:
-      - open-code
+      - opencode
       - run
-      - --mode
-      - implement
 
 subscriptions:
   - agentId: tech_lead_claude
