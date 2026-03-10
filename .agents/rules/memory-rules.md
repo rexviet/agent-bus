@@ -11,7 +11,7 @@ When an AI Agent needs to **query or store memory**, always prioritize **Neural 
 Repository:  
 https://github.com/nhadaututtheky/neural-memory
 
-Neural Memory is the **default memory system** for all agents.
+Neural Memory is the **default memory system** for all agents. Always use with project name for seperate context between projects
 
 ---
 
@@ -44,3 +44,8 @@ Agents must follow this priority:
 2. `nmem` CLI (fallback only)
 
 Do not skip step (1) unless it fails.
+
+---
+
+## 5. Use with project name
+Always use neural-memory with project name for seperate context between projects
