@@ -14,6 +14,10 @@ import {
   resolveDefaultDatabasePath
 } from "../storage/sqlite-client.js";
 import { createApprovalService } from "./approval-service.js";
+import {
+  createAdapterWorker,
+  type AdapterWorkerExecutionResult
+} from "./adapter-worker.js";
 import { createDeliveryService } from "./delivery-service.js";
 import { createDispatcher, type Dispatcher } from "./dispatcher.js";
 import { publishEvent } from "./publish-event.js";
@@ -85,6 +89,11 @@ export interface AgentBusDaemon {
   listDeliveriesForEvent(eventId: string): ReturnType<
     ReturnTypeOfCreateDeliveryStore["listDeliveriesForEvent"]
   >;
+  runWorkerIteration(
+    workerId: string,
+    leaseDurationMs: number,
+    retryDelayMs?: number
+  ): Promise<AdapterWorkerExecutionResult | null>;
   stop(): Promise<void>;
 }
 
@@ -134,6 +143,16 @@ export async function startDaemon(
   });
   const deliveryService = createDeliveryService({
     deliveryStore,
+    dispatcher
+  });
+  const adapterWorker = createAdapterWorker({
+    database,
+    manifest,
+    layout,
+    runStore,
+    eventStore,
+    deliveryStore,
+    deliveryService,
     dispatcher
   });
   const replayService = createReplayService({
@@ -261,6 +280,14 @@ export async function startDaemon(
 
     listDeliveriesForEvent(eventId: string) {
       return deliveryStore.listDeliveriesForEvent(eventId);
+    },
+
+    runWorkerIteration(workerId: string, leaseDurationMs: number, retryDelayMs?: number) {
+      return adapterWorker.runIteration({
+        workerId,
+        leaseDurationMs,
+        ...(retryDelayMs !== undefined ? { retryDelayMs } : {})
+      });
     },
 
     async stop() {

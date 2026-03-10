@@ -21,6 +21,13 @@ export interface FailDeliveryInput {
   readonly asOf?: string;
 }
 
+export interface DeadLetterDeliveryInput {
+  readonly deliveryId: string;
+  readonly leaseToken: string;
+  readonly errorMessage: string;
+  readonly asOf?: string;
+}
+
 export function createDeliveryService({
   deliveryStore,
   dispatcher
@@ -36,6 +43,10 @@ export function createDeliveryService({
 
     fail(input: FailDeliveryInput): PersistedDeliveryRecord {
       return deliveryStore.failDelivery(input);
+    },
+
+    deadLetter(input: DeadLetterDeliveryInput): PersistedDeliveryRecord {
+      return deliveryStore.deadLetterDelivery(input);
     },
 
     reclaimExpired(asOf?: string): PersistedDeliveryRecord[] {

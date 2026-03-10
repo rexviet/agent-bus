@@ -1,13 +1,13 @@
 # ROADMAP.md
 
-> **Current Phase**: Phase 3 - Runtime Adapters
+> **Current Phase**: Phase 4 - Operator Workflow
 > **Milestone**: v1.0
 
 ## Must-Haves (from SPEC)
 - [x] Repository-local workflow manifest
 - [x] Durable event store with approval, retry, dead-letter handling, and replay
 - [x] Shared workspace artifact handoff by relative path
-- [ ] Runtime adapter contract for Antigravity, Open Code, and Codex
+- [x] Runtime adapter contract for Antigravity, Open Code, and Codex
 - [ ] CLI operations for run inspection and approval workflow
 
 ## Phases
@@ -23,7 +23,7 @@
 **Requirements**: REQ-03, REQ-04, REQ-06, REQ-07, REQ-08, REQ-09
 
 ### Phase 3: Runtime Adapters
-**Status**: ⬜ Not Started
+**Status**: ✅ Complete
 **Objective**: Establish the adapter contract and deliver working Antigravity, Open Code, and Codex integrations against the shared workspace model.
 **Requirements**: REQ-10, REQ-12
 

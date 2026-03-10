@@ -68,6 +68,11 @@ export interface FailDeliveryInput extends AcknowledgeDeliveryInput {
   readonly asOf?: string;
 }
 
+export interface DeadLetterDeliveryInput extends AcknowledgeDeliveryInput {
+  readonly errorMessage: string;
+  readonly asOf?: string;
+}
+
 export interface ReplayDeliveryInput {
   readonly deliveryId: string;
   readonly availableAt?: string;
@@ -661,6 +666,51 @@ export function createDeliveryStore(database: DatabaseSync) {
 
       if (!delivery) {
         throw new Error(`Failed to load delivery ${input.deliveryId} after failure handling.`);
+      }
+
+      return delivery;
+    },
+
+    deadLetterDelivery(
+      input: DeadLetterDeliveryInput,
+      options: DeliveryMutationOptions = {}
+    ): PersistedDeliveryRecord {
+      const manageTransaction = options.skipTransaction !== true;
+      const asOf = input.asOf ?? new Date().toISOString();
+
+      if (manageTransaction) {
+        database.exec("BEGIN");
+      }
+
+      try {
+        const result = deadLetterDelivery.run(
+          asOf,
+          input.errorMessage,
+          asOf,
+          input.errorMessage,
+          input.deliveryId,
+          input.leaseToken
+        ) as { changes?: number };
+
+        if (!result.changes) {
+          throw new Error(`Failed to dead-letter delivery ${input.deliveryId}.`);
+        }
+
+        if (manageTransaction) {
+          database.exec("COMMIT");
+        }
+      } catch (error) {
+        if (manageTransaction) {
+          database.exec("ROLLBACK");
+        }
+
+        throw error;
+      }
+
+      const delivery = this.getDelivery(input.deliveryId);
+
+      if (!delivery) {
+        throw new Error(`Failed to load delivery ${input.deliveryId} after dead-lettering.`);
       }
 
       return delivery;

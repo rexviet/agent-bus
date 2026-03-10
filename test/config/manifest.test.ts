@@ -123,3 +123,30 @@ artifactConventions: []
       error.issues.some((issue) => issue.includes("shared workspace"))
   );
 });
+
+test("parseManifestText preserves runtime adapter metadata for open-code agents", () => {
+  const manifest = parseManifestText(`
+version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+agents:
+  - id: coder_open_code
+    runtime: open-code
+    command: [opencode, run]
+    workingDirectory: apps/worker/../adapter-runner
+    environment:
+      OPENCODE_AGENT: implement
+subscriptions:
+  - agentId: coder_open_code
+    topic: implementation_ready
+approvalGates: []
+artifactConventions: []
+`);
+
+  assert.equal(manifest.agents[0]?.runtime, "open-code");
+  assert.deepEqual(manifest.agents[0]?.command, ["opencode", "run"]);
+  assert.equal(manifest.agents[0]?.workingDirectory, "apps/adapter-runner");
+  assert.equal(manifest.agents[0]?.environment.OPENCODE_AGENT, "implement");
+});
