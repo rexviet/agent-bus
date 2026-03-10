@@ -1,105 +1,62 @@
 # STATE.md
 
-> **Current Phase**: 4 - Operator Workflow (completed)
-> **Current Focus**: Phase 4 review fixes landed on `feature/phase-4-operator-workflow`; awaiting refreshed PR review
+> **Current Phase**: Complete
+> **Current Focus**: Repository is paused cleanly after Phase 4 and README merges; no active implementation task
 > **Last Updated**: 2026-03-10
 
 ## Current Position
-- **Phase**: 4 - Operator Workflow (completed)
-- **Task**: All plans complete
-- **Status**: Review fixes verified at 2026-03-10 15:45 +07
+- **Phase**: Complete / v1.0
+- **Task**: Between tasks
+- **Status**: Paused at 2026-03-10 16:32 +07
 
 ## Active Work
-- Phase 1.1 completed
-- Phase 1.2 completed
-- Phase 1.3 completed
-- Phase 1.4 completed
-- Phase 2.1 completed
-- Phase 2.2 completed
-- Phase 2.3 completed
-- Phase 2.4 completed
-- Phase 3 research completed
-- Phase 3.1 completed
-- Phase 3.2 completed
-- Phase 3.3 completed
-- Phase 3.4 completed
-- Phase 3 verification completed
-- Phase 3 merged to `main`
-- Phase 4 research completed
-- Phase 4.1 completed
-- Phase 4.2 completed
-- Phase 4.3 completed
-- Phase 4.4 completed
-- Phase 4 verification completed
+- Phase 1 completed
+- Phase 2 completed
+- Phase 3 completed
+- Phase 4 completed
+- PR `#8` merged into `main` at `1d64a72`
+- PR `#9` merged into `main` at `4de2348`
 
 ## Last Session Summary
-Phase 4 remains complete on branch `feature/phase-4-operator-workflow`, and the follow-up review fixes are now in place. Operator read commands no longer trigger recovery mutations, run `updatedAt` advances with durable workflow mutations, and the deterministic demo can be reset and rerun without manual SQLite cleanup.
+The repository was synced cleanly after merging the remaining open work into `main`. Phase 4 operator workflow changes, their review fixes, and the new protocol README are all now merged; this pause branch exists only to capture an accurate handoff snapshot for the next session.
 
 ## In-Progress Work
-Product code for Phase 4 is complete and verified, including post-review fixes.
-- Branch: `feature/phase-4-operator-workflow`
-- Files modified: CLI/operator surface, daemon mutation paths, demo assets, and `.gsd` handoff files
-- Tests status: `npm test` passed on Node `22.12.0` with `61/61` tests; manifest validation passed for `agent-bus.example.yaml`, `agent-bus.yaml`, and `examples/operator-demo/agent-bus.demo.yaml`
+No product code is currently in progress.
+- Branch: `feature/pause-session-handoff`
+- Files modified: `.gsd/STATE.md`, `.gsd/JOURNAL.md`
+- Tests status: no new product tests were run in this pause-only session; latest known verification remains `npm test` with `61/61` passing tests plus manifest validation for `agent-bus.example.yaml`, `agent-bus.yaml`, and `examples/operator-demo/agent-bus.demo.yaml`; the README PR was docs-only and was previously checked with `git diff --check`
 
 ## Blockers
-No active implementation blocker.
+No active blocker.
 
 ## Context Dump
 Critical context that would be lost:
 
 ### Decisions Made
-- Replay must respect approval state: replay is allowed only for events with `approvalStatus` of `approved` or `not_required`, because replaying rejected work bypasses the product's human-gate contract.
-- Replay must reset execution state: `attemptCount`, lease fields, and terminal timestamps are cleared on replay so replayed work starts with a fresh retry budget and coherent audit metadata.
-- Node runtime baseline remains `22.12.0+`: local failures on older environments were caused by the repo's use of `node --experimental-sqlite`.
-- Phase 3 uses a file-backed adapter contract: the daemon writes a work package and reads a result envelope, so runtime workers never touch SQLite directly.
-- Fatal adapter failures dead-letter immediately, while retryable failures reschedule with explicit retry delays; clean exits without a result envelope are treated as process-level contract failures.
-- Runtime invocation is vendor-specific behind a shared contract: `codex exec`, `opencode run`, and `antigravity chat --mode agent` are isolated in adapter modules instead of hardcoded in daemon logic.
-- The shipped manifests now use real runtime command shapes instead of stale placeholders, so repository examples match the current adapter layer.
-- The Open Code binary on this machine is `opencode`, so the adapter layer must absorb binary-name drift while preserving stable manifest runtime identities.
-- The stale-lease and emitted-event atomicity bugs found in review were fixed before merge: follow-up events now persist atomically with parent acknowledgement, and lease expiry no longer crashes the worker path.
-- Phase 4 will add a daemon-owned operator service instead of letting CLI commands query SQLite directly.
-- Phase 4 run visibility should derive summary state from persisted events and deliveries instead of relying on the currently static `runs.status` field.
-- Phase 4 operator commands should support both concise text output and `--json`, with a thin `publish --envelope` bootstrap instead of a flag-heavy event builder.
-- Phase 4 demo verification should use deterministic fixture agents and generic manifest commands, not authenticated external runtimes.
-- Nested `--config` paths must still resolve workspace and state directories relative to the caller's repository root, not the config file's parent directory.
+- V1 scope is complete: `.gsd/ROADMAP.md` now shows milestone `v1.0` with all four phases complete, so the next work item should start as a fresh planning or discovery task.
+- Pause state must reflect merged reality: the older handoff text about Phase 4 waiting for review or merge is obsolete because PR `#8` and PR `#9` are already on `main`.
+- The pause handoff lives on a dedicated docs branch: even for session-state updates, this repo requires branch plus PR workflow rather than direct commits on `main`.
 
 ### Approaches Tried
-- Froze the shared adapter contract first with schema and path-safety tests before wiring any runtime execution.
-- Added a daemon-owned process runner and worker loop with deterministic fixture adapters covering success, retryable failure, fatal failure, and emitted-event fan-out.
-- Implemented vendor-specific builders for `codex`, `opencode`, and `antigravity` while preserving a generic manifest-command fallback for custom wrappers and fixtures.
-- Updated the shipped manifests to match real runtime command shapes and validated them through the compiled CLI.
-- Proved end-to-end artifact handoff across codex, open-code, and antigravity identities in a temporary local repository and kept smoke checks availability-aware for external CLIs.
-- Re-reviewed the Phase 3 branch after fixing the lease-expiry race and publish-before-ack bug; no remaining blocking findings were found before PR `#6` was merged.
+- Re-read `.gsd/STATE.md`, `.gsd/JOURNAL.md`, `.gsd/ROADMAP.md`, and the latest git history to align the handoff with the actual post-merge repository state.
+- Kept the scope to pause-state hygiene only: no roadmap, spec, or requirement content was reopened because this session is ending rather than starting a new milestone.
 
 ### Current Hypothesis
-The implementation work is done; the next step is to re-review and merge the Phase 4 execution PR after CI passes on the review-fix commit.
+The codebase is stable in a post-v1 state. The next useful session should start with `/resume`, then either choose a new milestone to plan or take on a fresh user-requested feature or bug from a new working branch.
 
 ### Files of Interest
-- `.gsd/phases/4/VERIFICATION.md`: Phase 4 requirement verification and closing evidence.
-- `.gsd/phases/4/RESEARCH.md`: Phase 4 design decisions and operator-surface constraints.
-- `.gsd/phases/4/01-PLAN.md`: read-model and daemon operator-service work.
-- `.gsd/phases/4/02-PLAN.md`: read-only operator CLI commands.
-- `.gsd/phases/4/03-PLAN.md`: approval, rejection, replay, and publish bootstrap CLI commands.
-- `.gsd/phases/4/04-PLAN.md`: deterministic end-to-end operator demo workflow.
-- `src/daemon/operator-service.ts`: daemon-owned operator read models for runs, approvals, and failures.
-- `src/cli.ts`, `src/cli/operator-command.ts`, `src/cli/output.ts`, `src/cli/load-envelope.ts`: the Phase 4 operator CLI surface.
-- `examples/operator-demo/agent-bus.demo.yaml`: deterministic demo manifest.
-- `examples/operator-demo/reset-demo.mjs`: clears demo runtime state so the fixed seed envelope can be rerun.
-- `test/cli/operator-read.test.ts`, `test/cli/operator-mutate.test.ts`, `test/cli/operator-workflow.e2e.test.ts`: CLI-level verification for read, mutate, and end-to-end operator workflows.
+- `.gsd/ROADMAP.md`: shows milestone `v1.0` and all phases complete.
+- `README.md`: merged protocol overview, installation guide, configuration guide, and usage entry point from PR `#9`.
+- `docs/operator-workflow-demo.md`: deterministic operator workflow walkthrough merged with Phase 4.
+- `.gsd/STATE.md`: current handoff snapshot for resuming.
+- `.gsd/JOURNAL.md`: chronological session log including this post-merge pause entry.
 
 ## Next Steps
-1. Review the updated Phase 4 execution PR and CI results
-2. Merge after approval
-3. Decide whether to codify Node `22.12.0` with `.nvmrc` or Volta
+1. Run `/resume` next session to reload the clean handoff state.
+2. Decide the next milestone or new task now that roadmap `v1.0` is complete.
+3. Start a fresh branch and planning workflow for whichever follow-up work is chosen.
 
 ## Notes
 - Project initialized through `/new-project`.
-- Phase 1 planning assumes TypeScript on Node 22, a root `agent-bus.yaml` manifest, `workspace/` for artifacts, and `.agent-bus/` for internal state.
-- Plan 1.1 completed with commits `23ca023` and `a49257f`.
-- Plan 1.2 completed with commits `3240c3a`, `7935dce`, and `f4a29f0`.
-- Plan 1.3 completed with commits `8368569`, `1a926c0`, and `b08ea22`.
-- Plan 1.4 completed with commits `e39b675`, `e6e3d31`, and `300b997`.
-- Phase 2 execution completed with commits `8aefba6`, `7babd78`, `1e87746`, `31a930b`, `5cb0d1d`, `a0293c4`, `95c8076`, `a65f3f1`, and `48c3779`.
-- Replay invariant fixes landed in commit `10a87f7` and were merged before PR `#1` was merged into PR `#3`.
-- Phase 3 execution completed on branch `feature/phase-3-runtime-adapters`; see `.gsd/phases/3/*-SUMMARY.md` and `.gsd/phases/3/VERIFICATION.md` for per-plan commit and evidence details.
-- PR `#6` merged Phase 3 into `main` at merge commit `b97691f`; the feature branch was deleted locally and remotely after sync.
+- The repository baseline remains Node `22.12.0+`; run `nvm use v22.12.0` before any `npm` command.
+- The operator workflow and deterministic demo are already merged on `main`; use `README.md` and `docs/operator-workflow-demo.md` as the primary entry points for future onboarding or validation.
