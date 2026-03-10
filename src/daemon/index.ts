@@ -20,6 +20,7 @@ import {
 } from "./adapter-worker.js";
 import { createDeliveryService } from "./delivery-service.js";
 import { createDispatcher, type Dispatcher } from "./dispatcher.js";
+import { createOperatorService } from "./operator-service.js";
 import { publishEvent } from "./publish-event.js";
 import { createRecoveryScan } from "./recovery-scan.js";
 import { createReplayService } from "./replay-service.js";
@@ -34,6 +35,8 @@ export interface StartDaemonOptions {
   readonly configPath: string;
   readonly repositoryRoot?: string;
   readonly recoveryIntervalMs?: number;
+  readonly startRecoveryScan?: boolean;
+  readonly runRecoveryScanOnStart?: boolean;
   readonly registerSignalHandlers?: boolean;
   readonly databasePath?: string;
 }
@@ -83,11 +86,23 @@ export interface AgentBusDaemon {
   runRecoveryScan(): number;
   dispatcherSnapshot(): ReturnType<Dispatcher["snapshot"]>;
   listPendingApprovals(): ReturnType<ReturnTypeOfCreateApprovalStore["listPendingApprovals"]>;
+  listPendingApprovalViews(): ReturnType<
+    ReturnType<typeof createOperatorService>["listPendingApprovalViews"]
+  >;
   getApprovalForEvent(eventId: string): ReturnType<
     ReturnTypeOfCreateApprovalStore["getApprovalForEvent"]
   >;
+  listRunSummaries(
+    limit?: number
+  ): ReturnType<ReturnType<typeof createOperatorService>["listRunSummaries"]>;
+  getRunDetail(
+    runId: string
+  ): ReturnType<ReturnType<typeof createOperatorService>["getRunDetail"]>;
   listDeliveriesForEvent(eventId: string): ReturnType<
     ReturnTypeOfCreateDeliveryStore["listDeliveriesForEvent"]
+  >;
+  listFailureDeliveries(): ReturnType<
+    ReturnType<typeof createOperatorService>["listFailureDeliveries"]
   >;
   runWorkerIteration(
     workerId: string,
@@ -139,10 +154,13 @@ export async function startDaemon(
     approvalStore,
     eventStore,
     deliveryStore,
+    runStore,
     dispatcher
   });
   const deliveryService = createDeliveryService({
     deliveryStore,
+    eventStore,
+    runStore,
     dispatcher
   });
   const adapterWorker = createAdapterWorker({
@@ -158,19 +176,33 @@ export async function startDaemon(
   const replayService = createReplayService({
     eventStore,
     deliveryStore,
+    runStore,
     dispatcher
+  });
+  const operatorService = createOperatorService({
+    runStore,
+    eventStore,
+    approvalStore,
+    deliveryStore
   });
   const recoveryScan = createRecoveryScan({
     approvalStore,
     deliveryStore,
+    eventStore,
+    runStore,
     dispatcher,
     ...(options.recoveryIntervalMs !== undefined
       ? { intervalMs: options.recoveryIntervalMs }
       : {})
   });
 
-  recoveryScan.start();
-  recoveryScan.runOnce();
+  if (options.startRecoveryScan !== false) {
+    recoveryScan.start();
+  }
+
+  if (options.runRecoveryScanOnStart !== false) {
+    recoveryScan.runOnce();
+  }
 
   let signalCleanup = (): void => {};
   let stopped = false;
@@ -274,12 +306,28 @@ export async function startDaemon(
       return approvalStore.listPendingApprovals();
     },
 
+    listPendingApprovalViews() {
+      return operatorService.listPendingApprovalViews();
+    },
+
     getApprovalForEvent(eventId: string) {
       return approvalStore.getApprovalForEvent(eventId);
     },
 
+    listRunSummaries(limit?: number) {
+      return operatorService.listRunSummaries(limit);
+    },
+
+    getRunDetail(runId: string) {
+      return operatorService.getRunDetail(runId);
+    },
+
     listDeliveriesForEvent(eventId: string) {
       return deliveryStore.listDeliveriesForEvent(eventId);
+    },
+
+    listFailureDeliveries() {
+      return operatorService.listFailureDeliveries();
     },
 
     runWorkerIteration(workerId: string, leaseDurationMs: number, retryDelayMs?: number) {

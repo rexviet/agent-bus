@@ -3,5 +3,7 @@ dist/
 
 .agent-bus/state/*
 .agent-bus/logs/*
+.agent-bus/demo-state/*
+.agent-bus/demo-logs/*
 !.agent-bus/state/.gitkeep
 !.agent-bus/logs/.gitkeep

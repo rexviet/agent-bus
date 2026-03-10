@@ -1,0 +1,49 @@
+version: 1
+workspace:
+  artifactsDir: examples/operator-demo/workspace
+  stateDir: .agent-bus/demo-state
+  logsDir: .agent-bus/demo-logs
+
+agents:
+  - id: tech_lead_demo
+    runtime: codex
+    description: Deterministic demo agent that writes a system design artifact.
+    command:
+      - node
+      - test/fixtures/agents/demo-agent.mjs
+  - id: qa_demo
+    runtime: antigravity
+    description: Deterministic demo agent that fails once before producing test cases.
+    command:
+      - node
+      - test/fixtures/agents/demo-agent.mjs
+
+subscriptions:
+  - agentId: tech_lead_demo
+    topic: plan_done
+    description: Produce the system design after plan approval.
+    requiredArtifacts:
+      - path: docs/plan.md
+        role: input
+        description: Approved plan artifact.
+  - agentId: qa_demo
+    topic: plan_done
+    description: Produce test cases after plan approval.
+    requiredArtifacts:
+      - path: docs/plan.md
+        role: input
+        description: Approved plan artifact.
+
+approvalGates:
+  - topic: plan_done
+    decision: manual
+    approvers:
+      - human
+    onReject: return_to_producer
+
+artifactConventions:
+  - topic: plan_done
+    outputs:
+      - path: docs/plan.md
+        role: primary
+        description: Approved plan artifact.

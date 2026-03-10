@@ -129,3 +129,73 @@ test("event store rejects duplicate dedupe keys", async () => {
     }
   });
 });
+
+test("event store lists a run timeline in occurred-at order", async () => {
+  await withTempDatabase(async (databasePath) => {
+    const database = openSqliteDatabase({ databasePath });
+
+    try {
+      await migrateDatabase(database);
+
+      const runStore = createRunStore(database);
+      const eventStore = createEventStore(database);
+
+      runStore.createRun({ runId: "run-timeline-001", status: "active" });
+
+      eventStore.insertEvent({
+        envelope: parseEventEnvelope({
+          eventId: "550e8400-e29b-41d4-a716-446655440010",
+          topic: "system_design_done",
+          runId: "run-timeline-001",
+          correlationId: "run-timeline-001",
+          dedupeKey: "system_design_done:run-timeline-001",
+          occurredAt: "2026-03-09T15:30:00Z",
+          producer: {
+            agentId: "tech_lead_claude",
+            runtime: "claude-code"
+          },
+          payload: { step: 2 },
+          payloadMetadata: {},
+          artifactRefs: []
+        })
+      });
+      eventStore.insertEvent({
+        envelope: parseEventEnvelope({
+          eventId: "550e8400-e29b-41d4-a716-446655440009",
+          topic: "plan_done",
+          runId: "run-timeline-001",
+          correlationId: "run-timeline-001",
+          dedupeKey: "plan_done:run-timeline-001",
+          occurredAt: "2026-03-09T15:20:00Z",
+          producer: {
+            agentId: "ba_codex",
+            runtime: "codex"
+          },
+          payload: { step: 1 },
+          payloadMetadata: {},
+          artifactRefs: [
+            {
+              path: "docs/plan.md",
+              role: "primary"
+            }
+          ]
+        }),
+        approvalStatus: "approved"
+      });
+
+      const timeline = eventStore.listEventsForRun("run-timeline-001");
+
+      assert.deepEqual(
+        timeline.map((event) => event.eventId),
+        [
+          "550e8400-e29b-41d4-a716-446655440009",
+          "550e8400-e29b-41d4-a716-446655440010"
+        ]
+      );
+      assert.equal(timeline[0]?.artifactRefs[0]?.path, "docs/plan.md");
+      assert.equal(timeline[1]?.producer.agentId, "tech_lead_claude");
+    } finally {
+      database.close();
+    }
+  });
+});

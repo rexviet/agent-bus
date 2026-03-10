@@ -7,7 +7,8 @@ import type { Dispatcher } from "./dispatcher.js";
 import type {
   ReturnTypeOfCreateApprovalStore,
   ReturnTypeOfCreateDeliveryStore,
-  ReturnTypeOfCreateEventStore
+  ReturnTypeOfCreateEventStore,
+  ReturnTypeOfCreateRunStore
 } from "./types.js";
 
 export interface ApprovalServiceOptions {
@@ -15,6 +16,7 @@ export interface ApprovalServiceOptions {
   readonly approvalStore: ReturnTypeOfCreateApprovalStore;
   readonly eventStore: ReturnTypeOfCreateEventStore;
   readonly deliveryStore: ReturnTypeOfCreateDeliveryStore;
+  readonly runStore: ReturnTypeOfCreateRunStore;
   readonly dispatcher: Dispatcher;
 }
 
@@ -38,6 +40,7 @@ export function createApprovalService({
   approvalStore,
   eventStore,
   deliveryStore,
+  runStore,
   dispatcher
 }: ApprovalServiceOptions) {
   return {
@@ -66,6 +69,7 @@ export function createApprovalService({
           approval.decidedAt,
           { skipTransaction: true }
         );
+        runStore.touchRun(event.runId);
         database.exec("COMMIT");
       } catch (error) {
         database.exec("ROLLBACK");
@@ -107,6 +111,7 @@ export function createApprovalService({
           undefined,
           { skipTransaction: true }
         );
+        runStore.touchRun(event.runId);
         database.exec("COMMIT");
       } catch (error) {
         database.exec("ROLLBACK");

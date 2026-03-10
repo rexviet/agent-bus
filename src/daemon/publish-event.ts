@@ -118,7 +118,9 @@ export function persistPublishedEvent({
 }: PersistPublishedEventOptions,
 options: PersistPublishedEventMutationOptions = {}
 ): PersistPublishedEventResult {
-  if (!runStore.getRun(envelope.runId)) {
+  const runAlreadyExists = runStore.getRun(envelope.runId) !== null;
+
+  if (!runAlreadyExists) {
     runStore.createRun({
       runId: envelope.runId,
       status: "active",
@@ -164,6 +166,9 @@ options: PersistPublishedEventMutationOptions = {}
       },
       { skipTransaction: true }
     );
+    if (runAlreadyExists) {
+      runStore.touchRun(envelope.runId);
+    }
     if (manageTransaction) {
       database.exec("COMMIT");
     }

@@ -286,3 +286,78 @@ test("replay clears terminal execution metadata and resets attempt count", async
     }
   });
 });
+
+test("delivery store lists run-scoped deliveries and failure views with event metadata", async () => {
+  await withTempDatabase(async (databasePath) => {
+    const database = openSqliteDatabase({ databasePath });
+
+    try {
+      await migrateDatabase(database);
+
+      const runStore = createRunStore(database);
+      const eventStore = createEventStore(database);
+      const deliveryStore = createDeliveryStore(database);
+
+      runStore.createRun({ runId: "run-failure-001", status: "active" });
+
+      const persistedEvent = eventStore.insertEvent({
+        envelope: parseEventEnvelope({
+          eventId: "550e8400-e29b-41d4-a716-446655440105",
+          topic: "implementation_ready",
+          runId: "run-failure-001",
+          correlationId: "run-failure-001",
+          dedupeKey: "implementation_ready:run-failure-001",
+          occurredAt: "2026-03-09T16:25:00Z",
+          producer: {
+            agentId: "tech_lead_claude",
+            runtime: "claude-code"
+          },
+          payload: {},
+          payloadMetadata: {},
+          artifactRefs: []
+        }),
+        approvalStatus: "approved"
+      });
+
+      deliveryStore.planDeliveries({
+        eventId: persistedEvent.eventId,
+        topic: persistedEvent.topic,
+        agentIds: ["coder_open_code"],
+        status: "ready",
+        availableAt: persistedEvent.createdAt
+      });
+
+      const claimed = deliveryStore.claimNextDelivery({
+        workerId: "worker-failure",
+        leaseDurationMs: 60_000,
+        asOf: minutesAfter(persistedEvent.createdAt, 1)
+      });
+
+      assert.ok(claimed);
+
+      const failed = deliveryStore.failDelivery({
+        deliveryId: claimed?.deliveryId as string,
+        leaseToken: claimed?.leaseToken as string,
+        errorMessage: "adapter failed",
+        retryDelayMs: 0,
+        asOf: minutesAfter(persistedEvent.createdAt, 1)
+      });
+
+      assert.equal(failed.status, "retry_scheduled");
+
+      const runDeliveries = deliveryStore.listDeliveriesForRun("run-failure-001");
+      const failures = deliveryStore.listFailureDeliveries();
+
+      assert.equal(runDeliveries.length, 1);
+      assert.equal(runDeliveries[0]?.runId, "run-failure-001");
+      assert.equal(runDeliveries[0]?.approvalStatus, "approved");
+      assert.equal(runDeliveries[0]?.correlationId, "run-failure-001");
+      assert.equal(failures.length, 1);
+      assert.equal(failures[0]?.deliveryId, failed.deliveryId);
+      assert.equal(failures[0]?.lastError, "adapter failed");
+      assert.equal(failures[0]?.eventOccurredAt, "2026-03-09T16:25:00Z");
+    } finally {
+      database.close();
+    }
+  });
+});

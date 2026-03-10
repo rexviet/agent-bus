@@ -2,6 +2,55 @@
 
 ## Entries
 
+## Session: 2026-03-10 15:45
+
+### Objective
+Fix the three blocking Phase 4 review findings and update the execution PR with verification.
+
+### Accomplished
+- Disabled recovery startup for operator CLI commands so `runs`, `approvals`, `failures`, `replay`, and `publish` no longer mutate unrelated durable state just by booting the daemon.
+- Added `runStore.touchRun()` and wired it through publish, approval, replay, delivery, and recovery paths so operator-visible run `updatedAt` now advances with durable workflow mutations.
+- Added a demo reset script, updated the operator demo walkthrough, and ignored demo state/log directories so the deterministic seed workflow can be rerun without manual SQLite cleanup or worktree noise.
+- Added regression coverage for read-only CLI startup behavior, run `updatedAt`, demo reset repeatability, and monotonic run timestamp updates.
+
+### Verification
+- [x] `npm test` passed with `61/61` tests
+- [x] `npm run build && node --experimental-sqlite dist/cli.js validate-manifest agent-bus.example.yaml && node --experimental-sqlite dist/cli.js validate-manifest agent-bus.yaml && node --experimental-sqlite dist/cli.js validate-manifest examples/operator-demo/agent-bus.demo.yaml` passed
+- [x] New regression tests passed for read-only CLI startup, run timestamp freshness, and demo reset repeatability
+
+### Paused Because
+The code fixes and verification are complete; the next meaningful step is to push the branch and let CI refresh on the PR.
+
+### Handoff Notes
+The branch remains `feature/phase-4-operator-workflow`. The key follow-up is procedural: push the review-fix commit, confirm CI stays green, and merge only after refreshed approval on the updated PR.
+
+## Session: 2026-03-10 15:15
+
+### Objective
+Execute all Phase 4 plans, verify the operator workflow goal, and leave the repository ready for PR review.
+
+### Accomplished
+- Executed all 4 Phase 4 plans and completed the operator read models, read-only CLI commands, mutating CLI commands, and deterministic demo workflow.
+- Added `src/daemon/operator-service.ts` plus new storage queries so the CLI can inspect runs, approvals, and failures without direct SQLite access.
+- Refactored the CLI into a testable command router with `runs`, `approvals`, `failures`, `replay`, and `publish --envelope`.
+- Added a deterministic operator demo manifest, seed envelope, seed plan artifact, fixture agent, walkthrough doc, and a full CLI end-to-end workflow test.
+- Fixed nested `--config` repository-root resolution so alternate manifest locations still resolve workspace and state paths correctly.
+- Wrote `.gsd/phases/4/VERIFICATION.md`, updated roadmap/state, and closed Phase 4 as complete.
+
+### Verification
+- [x] `npm test` passed with `57/57` tests
+- [x] `npm run build && node --experimental-sqlite dist/cli.js validate-manifest agent-bus.example.yaml && node --experimental-sqlite dist/cli.js validate-manifest agent-bus.yaml && node --experimental-sqlite dist/cli.js validate-manifest examples/operator-demo/agent-bus.demo.yaml` passed
+- [x] REQ-11 verified in `.gsd/phases/4/VERIFICATION.md`
+- [x] REQ-03 verified in `.gsd/phases/4/VERIFICATION.md`
+- [x] REQ-04 verified in `.gsd/phases/4/VERIFICATION.md`
+- [x] REQ-08 verified in `.gsd/phases/4/VERIFICATION.md`
+
+### Paused Because
+Phase 4 implementation and verification are complete, and the next meaningful step is PR review and merge.
+
+### Handoff Notes
+The execution branch is `feature/phase-4-operator-workflow`. The most important Phase 4 follow-up is procedural, not technical: keep the PR open until CI is green and a human approves merge. If nested demo configs behave oddly in future changes, re-check that CLI callers still pass the repository root explicitly when using `--config`.
+
 ## Session: 2026-03-10 14:48
 
 ### Objective

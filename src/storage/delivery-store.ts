@@ -1,6 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 
+import type { ApprovalStatus } from "./event-store.js";
+
 export type DeliveryStatus =
   | "pending_approval"
   | "ready"
@@ -78,6 +80,13 @@ export interface ReplayDeliveryInput {
   readonly availableAt?: string;
 }
 
+export interface DeliveryWithEventRecord extends PersistedDeliveryRecord {
+  readonly runId: string;
+  readonly correlationId: string;
+  readonly approvalStatus: ApprovalStatus;
+  readonly eventOccurredAt: string;
+}
+
 interface DeliveryRow {
   delivery_id: string;
   event_id: string;
@@ -100,6 +109,13 @@ interface DeliveryRow {
   replayed_from_delivery_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface DeliveryWithEventRow extends DeliveryRow {
+  run_id: string;
+  correlation_id: string;
+  approval_status: ApprovalStatus;
+  event_occurred_at: string;
 }
 
 const replayableDeliveryStatuses: readonly DeliveryStatus[] = [
@@ -146,6 +162,16 @@ function mapDeliveryRow(row: DeliveryRow): PersistedDeliveryRecord {
     ...(row.replayed_from_delivery_id
       ? { replayedFromDeliveryId: row.replayed_from_delivery_id }
       : {})
+  };
+}
+
+function mapDeliveryWithEventRow(row: DeliveryWithEventRow): DeliveryWithEventRecord {
+  return {
+    ...mapDeliveryRow(row),
+    runId: row.run_id,
+    correlationId: row.correlation_id,
+    approvalStatus: row.approval_status,
+    eventOccurredAt: row.event_occurred_at
   };
 }
 
@@ -286,6 +312,76 @@ export function createDeliveryStore(database: DatabaseSync) {
       updated_at
     FROM deliveries
     WHERE delivery_id = ?
+  `);
+  const selectDeliveriesForRun = database.prepare(`
+    SELECT
+      d.delivery_id,
+      d.event_id,
+      d.agent_id,
+      d.topic,
+      d.status,
+      d.available_at,
+      d.attempt_count,
+      d.max_attempts,
+      d.last_error,
+      d.lease_token,
+      d.lease_owner,
+      d.lease_expires_at,
+      d.claimed_at,
+      d.completed_at,
+      d.last_attempted_at,
+      d.dead_lettered_at,
+      d.dead_letter_reason,
+      d.replay_count,
+      d.replayed_from_delivery_id,
+      d.created_at,
+      d.updated_at,
+      e.run_id,
+      e.correlation_id,
+      e.approval_status,
+      e.occurred_at AS event_occurred_at
+    FROM deliveries d
+    INNER JOIN events e ON e.event_id = d.event_id
+    WHERE e.run_id = ?
+    ORDER BY d.created_at ASC, d.delivery_id ASC
+  `);
+  const selectFailureDeliveries = database.prepare(`
+    SELECT
+      d.delivery_id,
+      d.event_id,
+      d.agent_id,
+      d.topic,
+      d.status,
+      d.available_at,
+      d.attempt_count,
+      d.max_attempts,
+      d.last_error,
+      d.lease_token,
+      d.lease_owner,
+      d.lease_expires_at,
+      d.claimed_at,
+      d.completed_at,
+      d.last_attempted_at,
+      d.dead_lettered_at,
+      d.dead_letter_reason,
+      d.replay_count,
+      d.replayed_from_delivery_id,
+      d.created_at,
+      d.updated_at,
+      e.run_id,
+      e.correlation_id,
+      e.approval_status,
+      e.occurred_at AS event_occurred_at
+    FROM deliveries d
+    INNER JOIN events e ON e.event_id = d.event_id
+    WHERE d.status IN ('retry_scheduled', 'dead_letter')
+    ORDER BY
+      CASE d.status
+        WHEN 'dead_letter' THEN 0
+        ELSE 1
+      END,
+      d.updated_at DESC,
+      d.delivery_id ASC
   `);
   const claimDelivery = database.prepare(`
     UPDATE deliveries
@@ -488,6 +584,18 @@ export function createDeliveryStore(database: DatabaseSync) {
       const row = selectDeliveryById.get(deliveryId) as DeliveryRow | undefined;
 
       return row ? mapDeliveryRow(row) : null;
+    },
+
+    listDeliveriesForRun(runId: string): DeliveryWithEventRecord[] {
+      const rows = selectDeliveriesForRun.all(runId) as unknown as DeliveryWithEventRow[];
+
+      return rows.map(mapDeliveryWithEventRow);
+    },
+
+    listFailureDeliveries(): DeliveryWithEventRecord[] {
+      const rows = selectFailureDeliveries.all() as unknown as DeliveryWithEventRow[];
+
+      return rows.map(mapDeliveryWithEventRow);
     },
 
     listReadyDeliveries(asOf = new Date().toISOString()): PersistedDeliveryRecord[] {
