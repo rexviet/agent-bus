@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import { startDaemon } from "../../src/daemon/index.js";
 import { parseEventEnvelope } from "../../src/domain/event-envelope.js";
+import { openSqliteDatabase } from "../../src/storage/sqlite-client.js";
 
 const successAdapterPath = path.resolve(
   process.cwd(),
@@ -241,6 +242,108 @@ artifactConventions: []
         assert.equal(execution?.status, "fatal_error");
         assert.equal(execution?.delivery.status, "dead_letter");
         assert.equal(execution?.delivery.deadLetterReason, "Permanent adapter failure.");
+      } finally {
+        await daemon.stop();
+      }
+    }
+  );
+});
+
+test("runWorkerIteration rolls back emitted events when the worker lease expires", async () => {
+  await withTempRepo(
+    `version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+
+agents:
+  - id: coder_open_code
+    runtime: open-code
+    command: ["${process.execPath}", "${successAdapterPath}"]
+  - id: qa_antigravity
+    runtime: antigravity
+    command: ["${process.execPath}", "${successAdapterPath}"]
+
+subscriptions:
+  - agentId: coder_open_code
+    topic: implementation_ready
+  - agentId: qa_antigravity
+    topic: implementation_done
+
+approvalGates: []
+artifactConventions: []
+`,
+    async (configPath, repositoryRoot) => {
+      const daemon = await startDaemon({
+        configPath,
+        repositoryRoot,
+        registerSignalHandlers: false,
+        recoveryIntervalMs: 10
+      });
+
+      try {
+        daemon.publish(
+          parseEventEnvelope({
+            eventId: "550e8400-e29b-41d4-a716-446655440304",
+            topic: "implementation_ready",
+            runId: "run-adapter-004",
+            correlationId: "run-adapter-004",
+            dedupeKey: "implementation_ready:run-adapter-004",
+            occurredAt: "2026-03-10T05:15:00Z",
+            producer: {
+              agentId: "planner_codex",
+              runtime: "codex"
+            },
+            payload: {
+              delayMs: 150
+            },
+            payloadMetadata: {},
+            artifactRefs: []
+          })
+        );
+
+        const firstExecution = await daemon.runWorkerIteration("worker-lease-1", 20);
+
+        assert.ok(firstExecution);
+        assert.equal(firstExecution?.status, "process_error");
+        assert.equal(firstExecution?.delivery.status, "ready");
+        assert.equal(firstExecution?.emittedEvents.length, 0);
+
+        const database = openSqliteDatabase({ databasePath: daemon.databasePath });
+
+        try {
+          const persistedTopics = (
+            database
+              .prepare("SELECT topic FROM events ORDER BY created_at ASC")
+              .all() as { readonly topic: string }[]
+          ).map((row) => row.topic);
+          const persistedDeliveries = database.prepare(
+            "SELECT topic, status FROM deliveries ORDER BY created_at ASC"
+          ).all() as { readonly topic: string; readonly status: string }[];
+          const deliveryRows = persistedDeliveries.map((row) => ({
+            topic: row.topic,
+            status: row.status
+          }));
+
+          assert.deepEqual(persistedTopics, ["implementation_ready"]);
+          assert.deepEqual(deliveryRows, [
+            {
+              topic: "implementation_ready",
+              status: "ready"
+            }
+          ]);
+        } finally {
+          database.close();
+        }
+
+        const secondExecution = await daemon.runWorkerIteration("worker-lease-2", 5_000);
+
+        assert.ok(secondExecution);
+        assert.equal(secondExecution?.status, "success");
+        assert.equal(secondExecution?.delivery.status, "completed");
+        assert.equal(secondExecution?.emittedEvents.length, 1);
+        assert.equal(secondExecution?.emittedEvents[0]?.topic, "implementation_done");
       } finally {
         await daemon.stop();
       }

@@ -13,6 +13,7 @@ if (!workPackagePath || !resultFilePath) {
 }
 
 const workPackage = JSON.parse(await readFile(workPackagePath, "utf8"));
+const delayMs = Number(workPackage.event.payload.delayMs ?? 0);
 const emittedTopic = workPackage.event.payload.nextTopic ?? "implementation_done";
 const emittedPayload =
   workPackage.event.payload.emittedPayload &&
@@ -27,6 +28,10 @@ const outputAbsolutePath = path.join(
   workPackage.workspace.workspaceDir,
   outputRelativePath
 );
+
+if (Number.isFinite(delayMs) && delayMs > 0) {
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+}
 
 await mkdir(path.dirname(outputAbsolutePath), { recursive: true });
 await writeFile(

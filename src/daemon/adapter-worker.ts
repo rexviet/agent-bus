@@ -18,7 +18,8 @@ import type { PersistedDeliveryRecord } from "../storage/delivery-store.js";
 import type { PersistedEventRecord } from "../storage/event-store.js";
 import {
   buildFollowUpEventEnvelope,
-  publishEvent
+  dispatchPublishedEvent,
+  persistPublishedEvent
 } from "./publish-event.js";
 import { planSubscriptionsForTopic } from "./subscription-planner.js";
 import type {
@@ -161,11 +162,95 @@ function isFatalSetupError(error: unknown): boolean {
   );
 }
 
-async function publishEmittedEvents(
+interface WorkerResultPaths {
+  readonly workPackagePath: string;
+  readonly resultFilePath: string;
+  readonly logFilePath: string;
+}
+
+function buildWorkerExecutionResult(
+  status: AdapterWorkerExecutionResult["status"],
+  delivery: PersistedDeliveryRecord,
+  resultPaths: WorkerResultPaths,
+  emittedEvents: readonly PersistedEventRecord[] = []
+): AdapterWorkerExecutionResult {
+  return {
+    status,
+    delivery,
+    workPackagePath: resultPaths.workPackagePath,
+    resultFilePath: resultPaths.resultFilePath,
+    logFilePath: resultPaths.logFilePath,
+    emittedEvents: [...emittedEvents]
+  };
+}
+
+function currentDeliveryLostLease(
+  deliveryStore: Pick<ReturnTypeOfCreateDeliveryStore, "getDelivery">,
+  deliveryId: string,
+  leaseToken: string
+): PersistedDeliveryRecord | null {
+  const currentDelivery = deliveryStore.getDelivery(deliveryId);
+
+  if (!currentDelivery) {
+    return null;
+  }
+
+  return currentDelivery.status === "leased" && currentDelivery.leaseToken === leaseToken
+    ? null
+    : currentDelivery;
+}
+
+function finalizeLeaseBoundTransition(
+  options: Pick<AdapterWorkerOptions, "deliveryStore"> & {
+    readonly deliveryId: string;
+    readonly leaseToken: string;
+    readonly resultPaths: WorkerResultPaths;
+    readonly transitionStatus: AdapterWorkerExecutionResult["status"];
+    readonly transition: () => PersistedDeliveryRecord;
+  }
+): AdapterWorkerExecutionResult {
+  const staleLeaseDelivery = currentDeliveryLostLease(
+    options.deliveryStore,
+    options.deliveryId,
+    options.leaseToken
+  );
+
+  if (staleLeaseDelivery) {
+    return buildWorkerExecutionResult(
+      "process_error",
+      staleLeaseDelivery,
+      options.resultPaths
+    );
+  }
+
+  try {
+    return buildWorkerExecutionResult(
+      options.transitionStatus,
+      options.transition(),
+      options.resultPaths
+    );
+  } catch (error) {
+    const currentDelivery = currentDeliveryLostLease(
+      options.deliveryStore,
+      options.deliveryId,
+      options.leaseToken
+    );
+
+    if (currentDelivery) {
+      return buildWorkerExecutionResult("process_error", currentDelivery, options.resultPaths);
+    }
+
+    throw error;
+  }
+}
+
+function publishEmittedEventsAndAcknowledge(
   options: Pick<
     AdapterWorkerOptions,
     "database" | "manifest" | "runStore" | "eventStore" | "deliveryStore" | "dispatcher"
   > & {
+    readonly deliveryId: string;
+    readonly leaseToken: string;
     readonly drafts: readonly EmittedEventDraft[];
     readonly sourceEvent: PersistedEventRecord;
     readonly producer: {
@@ -174,33 +259,61 @@ async function publishEmittedEvents(
       readonly model?: string;
     };
     readonly defaultArtifactRefs: PersistedEventRecord["artifactRefs"];
-  }
-): Promise<PersistedEventRecord[]> {
+  },
+  resultPaths: WorkerResultPaths
+): AdapterWorkerExecutionResult {
   const emittedEvents: PersistedEventRecord[] = [];
+  const dispatchQueue: Parameters<typeof dispatchPublishedEvent>[1][] = [];
+  let delivery: PersistedDeliveryRecord;
 
-  for (const [index, draft] of options.drafts.entries()) {
-    const envelope = buildFollowUpEventEnvelope({
-      draft,
-      sourceEvent: options.sourceEvent,
-      producer: options.producer,
-      sequence: index + 1,
-      defaultArtifactRefs: options.defaultArtifactRefs
-    });
+  options.database.exec("BEGIN");
 
-    emittedEvents.push(
-      publishEvent({
-        database: options.database,
-        manifest: options.manifest,
-        runStore: options.runStore,
-        eventStore: options.eventStore,
-        deliveryStore: options.deliveryStore,
-        dispatcher: options.dispatcher,
-        envelope
-      })
+  try {
+    for (const [index, draft] of options.drafts.entries()) {
+      const envelope = buildFollowUpEventEnvelope({
+        draft,
+        sourceEvent: options.sourceEvent,
+        producer: options.producer,
+        sequence: index + 1,
+        defaultArtifactRefs: options.defaultArtifactRefs
+      });
+
+      const publication = persistPublishedEvent(
+        {
+          database: options.database,
+          manifest: options.manifest,
+          runStore: options.runStore,
+          eventStore: options.eventStore,
+          deliveryStore: options.deliveryStore,
+          envelope
+        },
+        { skipTransaction: true }
+      );
+
+      emittedEvents.push(publication.event);
+      dispatchQueue.push(publication);
+    }
+
+    delivery = options.deliveryStore.acknowledgeDelivery(
+      {
+        deliveryId: options.deliveryId,
+        leaseToken: options.leaseToken
+      },
+      { skipTransaction: true }
     );
+
+    options.database.exec("COMMIT");
+
+  } catch (error) {
+    options.database.exec("ROLLBACK");
+    throw error;
   }
 
-  return emittedEvents;
+  for (const publication of dispatchQueue) {
+    dispatchPublishedEvent(options.dispatcher, publication);
+  }
+
+  return buildWorkerExecutionResult("success", delivery, resultPaths, emittedEvents);
 }
 
 export function createAdapterWorker(options: AdapterWorkerOptions) {
@@ -221,6 +334,11 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
       }
 
       const runPaths = buildRunDirectory(options.layout, claimedDelivery);
+      const resultPaths: WorkerResultPaths = {
+        workPackagePath: path.join(runPaths.runDirectory, "work-package.json"),
+        resultFilePath: runPaths.resultFilePath,
+        logFilePath: runPaths.logFilePath
+      };
       const leaseToken = claimedDelivery.leaseToken;
 
       if (!leaseToken) {
@@ -286,8 +404,125 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
               ? `Adapter command for ${agent.id} exited without writing a result envelope.`
               : `Adapter command for ${agent.id} exited with code ${processResult.exitCode ?? "null"}${processResult.signal ? ` signal ${processResult.signal}` : ""}.`;
 
-          const delivery =
-            processResult.exitCode === 0 && processResult.signal === null
+          return finalizeLeaseBoundTransition({
+            deliveryStore: options.deliveryStore,
+            deliveryId: claimedDelivery.deliveryId,
+            leaseToken,
+            resultPaths: {
+              workPackagePath: processResult.workPackagePath,
+              resultFilePath: processResult.resultFilePath,
+              logFilePath: processResult.logFilePath
+            },
+            transitionStatus: "process_error",
+            transition: () =>
+              processResult.exitCode === 0 && processResult.signal === null
+                ? options.deliveryService.deadLetter({
+                    deliveryId: claimedDelivery.deliveryId,
+                    leaseToken,
+                    errorMessage
+                  })
+                : options.deliveryService.fail({
+                    deliveryId: claimedDelivery.deliveryId,
+                    leaseToken,
+                    errorMessage,
+                    retryDelayMs: input.retryDelayMs ?? defaultRetryDelayMs
+                  })
+          });
+        }
+
+        const adapterResult = processResult.result;
+
+        if (adapterResult.status === "retryable_error") {
+          return finalizeLeaseBoundTransition({
+            deliveryStore: options.deliveryStore,
+            deliveryId: claimedDelivery.deliveryId,
+            leaseToken,
+            resultPaths: {
+              workPackagePath: processResult.workPackagePath,
+              resultFilePath: processResult.resultFilePath,
+              logFilePath: processResult.logFilePath
+            },
+            transitionStatus: adapterResult.status,
+            transition: () =>
+              options.deliveryService.fail({
+                deliveryId: claimedDelivery.deliveryId,
+                leaseToken,
+                errorMessage: adapterResult.errorMessage,
+                retryDelayMs: adapterResult.retryDelayMs
+              })
+          });
+        }
+
+        if (adapterResult.status === "fatal_error") {
+          return finalizeLeaseBoundTransition({
+            deliveryStore: options.deliveryStore,
+            deliveryId: claimedDelivery.deliveryId,
+            leaseToken,
+            resultPaths: {
+              workPackagePath: processResult.workPackagePath,
+              resultFilePath: processResult.resultFilePath,
+              logFilePath: processResult.logFilePath
+            },
+            transitionStatus: adapterResult.status,
+            transition: () =>
+              options.deliveryService.deadLetter({
+                deliveryId: claimedDelivery.deliveryId,
+                leaseToken,
+                errorMessage: adapterResult.errorMessage
+              })
+          });
+        }
+
+        return publishEmittedEventsAndAcknowledge(
+          {
+            database: options.database,
+            manifest: options.manifest,
+            runStore: options.runStore,
+            eventStore: options.eventStore,
+            deliveryStore: options.deliveryStore,
+            dispatcher: options.dispatcher,
+            deliveryId: claimedDelivery.deliveryId,
+            leaseToken,
+            drafts: adapterResult.events,
+            sourceEvent: event,
+            producer: {
+              agentId: agent.id,
+              runtime: agent.runtime
+            },
+            defaultArtifactRefs: adapterResult.outputArtifacts
+          },
+          {
+            workPackagePath: processResult.workPackagePath,
+            resultFilePath: processResult.resultFilePath,
+            logFilePath: processResult.logFilePath
+          }
+        );
+      } catch (error) {
+        const staleLeaseDelivery = currentDeliveryLostLease(
+          options.deliveryStore,
+          claimedDelivery.deliveryId,
+          leaseToken
+        );
+
+        if (staleLeaseDelivery) {
+          return buildWorkerExecutionResult(
+            "process_error",
+            staleLeaseDelivery,
+            resultPaths
+          );
+        }
+
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown adapter worker failure.";
+
+        return finalizeLeaseBoundTransition({
+          deliveryStore: options.deliveryStore,
+          deliveryId: claimedDelivery.deliveryId,
+          leaseToken,
+          resultPaths,
+          transitionStatus: "process_error",
+          transition: () =>
+            isFatalSetupError(error)
               ? options.deliveryService.deadLetter({
                   deliveryId: claimedDelivery.deliveryId,
                   leaseToken,
@@ -298,105 +533,8 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
                   leaseToken,
                   errorMessage,
                   retryDelayMs: input.retryDelayMs ?? defaultRetryDelayMs
-                });
-
-          return {
-            status: "process_error",
-            delivery,
-            workPackagePath: processResult.workPackagePath,
-            resultFilePath: processResult.resultFilePath,
-            logFilePath: processResult.logFilePath,
-            emittedEvents: []
-          };
-        }
-
-        if (processResult.result.status === "retryable_error") {
-          const delivery = options.deliveryService.fail({
-            deliveryId: claimedDelivery.deliveryId,
-            leaseToken,
-            errorMessage: processResult.result.errorMessage,
-            retryDelayMs: processResult.result.retryDelayMs
-          });
-
-          return {
-            status: processResult.result.status,
-            delivery,
-            workPackagePath: processResult.workPackagePath,
-            resultFilePath: processResult.resultFilePath,
-            logFilePath: processResult.logFilePath,
-            emittedEvents: []
-          };
-        }
-
-        if (processResult.result.status === "fatal_error") {
-          const delivery = options.deliveryService.deadLetter({
-            deliveryId: claimedDelivery.deliveryId,
-            leaseToken,
-            errorMessage: processResult.result.errorMessage
-          });
-
-          return {
-            status: processResult.result.status,
-            delivery,
-            workPackagePath: processResult.workPackagePath,
-            resultFilePath: processResult.resultFilePath,
-            logFilePath: processResult.logFilePath,
-            emittedEvents: []
-          };
-        }
-
-        const emittedEvents = await publishEmittedEvents({
-          database: options.database,
-          manifest: options.manifest,
-          runStore: options.runStore,
-          eventStore: options.eventStore,
-          deliveryStore: options.deliveryStore,
-          dispatcher: options.dispatcher,
-          drafts: processResult.result.events,
-          sourceEvent: event,
-          producer: {
-            agentId: agent.id,
-            runtime: agent.runtime
-          },
-          defaultArtifactRefs: processResult.result.outputArtifacts
+                })
         });
-        const delivery = options.deliveryService.acknowledge(
-          claimedDelivery.deliveryId,
-          leaseToken
-        );
-
-        return {
-          status: processResult.result.status,
-          delivery,
-          workPackagePath: processResult.workPackagePath,
-          resultFilePath: processResult.resultFilePath,
-          logFilePath: processResult.logFilePath,
-          emittedEvents
-        };
-      } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : "Unknown adapter worker failure.";
-        const delivery = isFatalSetupError(error)
-          ? options.deliveryService.deadLetter({
-              deliveryId: claimedDelivery.deliveryId,
-              leaseToken,
-              errorMessage
-            })
-          : options.deliveryService.fail({
-              deliveryId: claimedDelivery.deliveryId,
-              leaseToken,
-              errorMessage,
-              retryDelayMs: input.retryDelayMs ?? defaultRetryDelayMs
-            });
-
-        return {
-          status: "process_error",
-          delivery,
-          workPackagePath: path.join(runPaths.runDirectory, "work-package.json"),
-          resultFilePath: runPaths.resultFilePath,
-          logFilePath: runPaths.logFilePath,
-          emittedEvents: []
-        };
       }
     }
   };
