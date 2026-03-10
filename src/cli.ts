@@ -6,6 +6,8 @@ import {
   formatRuntimeLayout
 } from "./shared/runtime-layout.js";
 import { loadManifest, ManifestValidationError } from "./config/load-manifest.js";
+import { runOperatorCommand } from "./cli/operator-command.js";
+import type { WritableTextStream } from "./cli/output.js";
 
 const HELP_TEXT = `agent-bus
 
@@ -14,12 +16,18 @@ Usage:
   agent-bus daemon [--config path] [--exit-after-ready]
   agent-bus layout [--config path] [--ensure]
   agent-bus validate-manifest [path]
+  agent-bus runs <subcommand>
+  agent-bus approvals <subcommand>
+  agent-bus failures <subcommand>
 
 Commands:
   daemon         Start the local dispatcher process
   layout          Print resolved runtime directories
   validate-manifest
                  Validate a workflow manifest file
+  runs           Inspect recent runs and run details
+  approvals      List pending approval work
+  failures       Inspect retry-scheduled and dead-letter deliveries
 
 Options:
   --config        Manifest path to load
@@ -28,6 +36,12 @@ Options:
                  Start the daemon, initialize everything, then exit cleanly
   --help          Show this help output
 `;
+
+export interface CliMainOptions {
+  readonly cwd?: string;
+  readonly stdout?: WritableTextStream;
+  readonly stderr?: WritableTextStream;
+}
 
 function hasFlag(args: readonly string[], flag: string): boolean {
   return args.includes(flag);
@@ -46,17 +60,24 @@ function readOptionValue(
   return args[optionIndex + 1];
 }
 
-export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
+export async function main(
+  argv: readonly string[] = process.argv.slice(2),
+  options: CliMainOptions = {}
+): Promise<number> {
+  const stdout = options.stdout ?? process.stdout;
+  const stderr = options.stderr ?? process.stderr;
+  const cwd = options.cwd ?? process.cwd();
+
   if (argv.length === 0 || hasFlag(argv, "--help") || hasFlag(argv, "-h")) {
-    process.stdout.write(`${HELP_TEXT}\n`);
-    return;
+    stdout.write(`${HELP_TEXT}\n`);
+    return 0;
   }
 
   const [command] = argv;
 
   if (command === "layout") {
     const configPath = readOptionValue(argv, "--config") ?? "agent-bus.yaml";
-    const absoluteConfigPath = path.resolve(process.cwd(), configPath);
+    const absoluteConfigPath = path.resolve(cwd, configPath);
     const manifest = await loadManifest(absoluteConfigPath);
     const repositoryRoot = path.dirname(absoluteConfigPath);
     const layout = hasFlag(argv, "--ensure")
@@ -69,30 +90,29 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
           workspace: manifest.workspace
         });
 
-    process.stdout.write(`${formatRuntimeLayout(layout)}\n`);
-    return;
+    stdout.write(`${formatRuntimeLayout(layout)}\n`);
+    return 0;
   }
 
   if (command === "validate-manifest") {
     const manifestPath = argv[1] ?? "agent-bus.yaml";
 
     try {
-      const manifest = await loadManifest(path.resolve(process.cwd(), manifestPath));
-      process.stdout.write(
+      const manifest = await loadManifest(path.resolve(cwd, manifestPath));
+      stdout.write(
         `Manifest is valid: ${manifestPath}\n` +
           `agents=${manifest.agents.length} subscriptions=${manifest.subscriptions.length} approvalGates=${manifest.approvalGates.length}\n`
       );
-      return;
+      return 0;
     } catch (error) {
       if (error instanceof ManifestValidationError) {
-        process.stderr.write(`${error.message}\n`);
+        stderr.write(`${error.message}\n`);
 
         for (const issue of error.issues) {
-          process.stderr.write(`- ${issue}\n`);
+          stderr.write(`- ${issue}\n`);
         }
 
-        process.exitCode = 1;
-        return;
+        return 1;
       }
 
       throw error;
@@ -104,26 +124,38 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     const configPath = readOptionValue(argv, "--config") ?? "agent-bus.yaml";
     const exitAfterReady = hasFlag(argv, "--exit-after-ready");
     const daemon = await startDaemon({
-      configPath: path.resolve(process.cwd(), configPath)
+      configPath: path.resolve(cwd, configPath)
     });
 
-    process.stdout.write(
+    stdout.write(
       `Daemon ready\nconfigPath: ${configPath}\ndatabasePath: ${daemon.databasePath}\n`
     );
 
     if (exitAfterReady) {
       await daemon.stop();
-      process.stdout.write("Daemon exited after readiness check\n");
-      return;
+      stdout.write("Daemon exited after readiness check\n");
+      return 0;
     }
 
-    return;
+    return 0;
   }
 
-  process.stderr.write(`Unknown command: ${command}\n\n${HELP_TEXT}\n`);
-  process.exitCode = 1;
+  if (command && ["runs", "approvals", "failures"].includes(command)) {
+    return runOperatorCommand(argv, {
+      cwd,
+      stdout,
+      stderr
+    });
+  }
+
+  stderr.write(`Unknown command: ${command}\n\n${HELP_TEXT}\n`);
+  return 1;
 }
 
 if (import.meta.url === new URL(process.argv[1] ?? "", "file:").href) {
-  await main();
+  const exitCode = await main();
+
+  if (exitCode !== 0) {
+    process.exitCode = exitCode;
+  }
 }
