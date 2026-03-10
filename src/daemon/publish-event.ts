@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
+import type { EmittedEventDraft } from "../adapters/contract.js";
 import type { AgentBusManifest } from "../config/manifest-schema.js";
 import type { EventEnvelope } from "../domain/event-envelope.js";
 import type {
@@ -30,6 +32,45 @@ export interface PublishEventOptions {
   readonly deliveryStore: ReturnTypeOfCreateDeliveryStore;
   readonly dispatcher: Dispatcher;
   readonly envelope: EventEnvelope;
+}
+
+export interface BuildFollowUpEventEnvelopeInput {
+  readonly draft: EmittedEventDraft;
+  readonly sourceEvent: PersistedEventRecord;
+  readonly producer: {
+    readonly agentId: string;
+    readonly runtime: string;
+    readonly model?: string;
+  };
+  readonly sequence: number;
+  readonly defaultArtifactRefs?: EventEnvelope["artifactRefs"];
+  readonly occurredAt?: string;
+}
+
+export function buildFollowUpEventEnvelope(
+  input: BuildFollowUpEventEnvelopeInput
+): EventEnvelope {
+  const occurredAt = input.occurredAt ?? new Date().toISOString();
+  const artifactRefs =
+    input.draft.artifactRefs.length > 0
+      ? input.draft.artifactRefs
+      : (input.defaultArtifactRefs ?? []);
+
+  return {
+    eventId: randomUUID(),
+    topic: input.draft.topic,
+    runId: input.sourceEvent.runId,
+    correlationId: input.sourceEvent.correlationId,
+    causationId: input.sourceEvent.eventId,
+    dedupeKey:
+      input.draft.dedupeKey ??
+      `${input.draft.topic}:${input.sourceEvent.eventId}:${input.producer.agentId}:${input.sequence}`,
+    occurredAt,
+    producer: input.producer,
+    payload: input.draft.payload,
+    payloadMetadata: input.draft.payloadMetadata,
+    artifactRefs
+  };
 }
 
 export function publishEvent({
