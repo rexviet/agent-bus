@@ -2,6 +2,29 @@
 
 ## Entries
 
+## Session: 2026-03-10 11:04
+
+### Objective
+Create Phase 3 runtime-adapter research and executable plans on top of the completed orchestration core.
+
+### Accomplished
+- Researched the current CLI surfaces for Codex, Open Code, and Antigravity.
+- Wrote `.gsd/phases/3/RESEARCH.md` with the contract, invocation, and risk decisions for Phase 3.
+- Created four execution plans for Phase 3 covering the shared adapter contract, daemon worker execution, vendor adapters, and end-to-end verification.
+- Updated `STATE.md` so the next session resumes directly into Phase 3 execution.
+
+### Verification
+- [x] Phase 3 research captured in `.gsd/phases/3/RESEARCH.md`
+- [x] `01-PLAN.md` through `04-PLAN.md` created for Phase 3
+- [x] Manual plan-checker review passed for requirement coverage, dependency order, verify commands, and context references
+- [ ] Phase 3 execution started
+
+### Paused Because
+Planning is complete and the next meaningful step is `/execute 3`, starting with the shared adapter contract.
+
+### Handoff Notes
+The key Phase 3 decision is to keep the control plane file-backed: the daemon should write a work package, run a runtime-specific adapter command, and read a result envelope back from disk. `codex exec` and `opencode run` look strong for non-interactive execution; Antigravity is workable but more editor-centric, so keep its adapter isolated and rely on result files instead of stdout.
+
 ## Session: 2026-03-09 23:57
 
 ### Objective
