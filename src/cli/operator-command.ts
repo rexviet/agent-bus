@@ -103,6 +103,7 @@ async function withDaemon<T>(
   const absoluteConfigPath = path.resolve(io.cwd, configPath);
   const daemon = await startDaemon({
     configPath: absoluteConfigPath,
+    repositoryRoot: io.cwd,
     registerSignalHandlers: false
   });
 

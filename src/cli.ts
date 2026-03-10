@@ -83,7 +83,7 @@ export async function main(
     const configPath = readOptionValue(argv, "--config") ?? "agent-bus.yaml";
     const absoluteConfigPath = path.resolve(cwd, configPath);
     const manifest = await loadManifest(absoluteConfigPath);
-    const repositoryRoot = path.dirname(absoluteConfigPath);
+    const repositoryRoot = path.resolve(cwd);
     const layout = hasFlag(argv, "--ensure")
       ? await ensureRuntimeLayout({
           repositoryRoot,
@@ -128,7 +128,8 @@ export async function main(
     const configPath = readOptionValue(argv, "--config") ?? "agent-bus.yaml";
     const exitAfterReady = hasFlag(argv, "--exit-after-ready");
     const daemon = await startDaemon({
-      configPath: path.resolve(cwd, configPath)
+      configPath: path.resolve(cwd, configPath),
+      repositoryRoot: path.resolve(cwd)
     });
 
     stdout.write(
