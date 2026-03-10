@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import type { AgentBusManifest } from "../config/manifest-schema.js";
+import type { PreparedAdapterCommand } from "./process-runner.js";
+import { buildCodexCommand } from "./vendors/codex.js";
+import { buildOpenCodeCommand } from "./vendors/open-code.js";
+
 export const SupportedRuntimeFamilySchema = z.enum([
   "codex",
   "open-code",
@@ -13,6 +18,14 @@ export interface RuntimeDefinition {
   readonly displayName: string;
   readonly executableCandidates: readonly string[];
   readonly executionMode: "non_interactive_cli" | "editor_cli";
+}
+
+export interface BuildAdapterCommandInput {
+  readonly agent: AgentBusManifest["agents"][number];
+  readonly workingDirectory: string;
+  readonly workPackagePath: string;
+  readonly resultFilePath: string;
+  readonly logFilePath: string;
 }
 
 const runtimeDefinitions = {
@@ -82,4 +95,69 @@ export function guessRuntimeFamilyFromExecutable(
   }
 
   return null;
+}
+
+function buildBaseEnvironment(
+  input: BuildAdapterCommandInput
+): Record<string, string> {
+  return {
+    ...input.agent.environment,
+    AGENT_BUS_SCHEMA_VERSION: "1",
+    AGENT_BUS_AGENT_ID: input.agent.id,
+    AGENT_BUS_RUNTIME: input.agent.runtime,
+    AGENT_BUS_WORK_PACKAGE_PATH: input.workPackagePath,
+    AGENT_BUS_RESULT_FILE_PATH: input.resultFilePath,
+    AGENT_BUS_LOG_FILE_PATH: input.logFilePath
+  };
+}
+
+function buildGenericManifestCommand(
+  input: BuildAdapterCommandInput
+): PreparedAdapterCommand {
+  const [command, ...args] = input.agent.command;
+
+  if (!command) {
+    throw new Error(`Agent ${input.agent.id} does not define an executable command.`);
+  }
+
+  return {
+    command,
+    args,
+    workingDirectory: input.workingDirectory,
+    environment: buildBaseEnvironment(input)
+  };
+}
+
+export function buildAdapterCommand(
+  input: BuildAdapterCommandInput
+): PreparedAdapterCommand {
+  const runtimeDefinition = getRuntimeDefinition(input.agent.runtime);
+  const executable = input.agent.command[0];
+
+  if (!runtimeDefinition || !executable) {
+    return buildGenericManifestCommand(input);
+  }
+
+  if (!runtimeDefinition.executableCandidates.includes(executable)) {
+    return buildGenericManifestCommand(input);
+  }
+
+  const vendorInput = {
+    executable,
+    existingArgs: input.agent.command.slice(1),
+    workingDirectory: input.workingDirectory,
+    workPackagePath: input.workPackagePath,
+    resultFilePath: input.resultFilePath,
+    logFilePath: input.logFilePath,
+    baseEnvironment: buildBaseEnvironment(input)
+  };
+
+  switch (runtimeDefinition.family) {
+    case "codex":
+      return buildCodexCommand(vendorInput);
+    case "open-code":
+      return buildOpenCodeCommand(vendorInput);
+    case "antigravity":
+      return buildGenericManifestCommand(input);
+  }
 }

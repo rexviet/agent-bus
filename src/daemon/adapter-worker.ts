@@ -7,10 +7,10 @@ import {
   type AdapterResultEnvelope,
   type EmittedEventDraft
 } from "../adapters/contract.js";
+import { buildAdapterCommand } from "../adapters/registry.js";
 import {
   materializeAdapterRun,
-  runPreparedAdapterCommand,
-  type PreparedAdapterCommand
+  runPreparedAdapterCommand
 } from "../adapters/process-runner.js";
 import type { AgentBusManifest } from "../config/manifest-schema.js";
 import type { RuntimeLayout } from "../shared/runtime-layout.js";
@@ -106,35 +106,6 @@ function buildRunDirectory(
     runDirectory,
     resultFilePath,
     logFilePath
-  };
-}
-
-function buildPreparedCommand(
-  agent: AgentBusManifest["agents"][number],
-  workingDirectory: string,
-  workPackagePath: string,
-  resultFilePath: string,
-  logFilePath: string
-): PreparedAdapterCommand {
-  const [command, ...args] = agent.command;
-
-  if (!command) {
-    throw new Error(`Agent ${agent.id} does not define an executable command.`);
-  }
-
-  return {
-    command,
-    args,
-    workingDirectory,
-    environment: {
-      ...agent.environment,
-      AGENT_BUS_SCHEMA_VERSION: "1",
-      AGENT_BUS_AGENT_ID: agent.id,
-      AGENT_BUS_RUNTIME: agent.runtime,
-      AGENT_BUS_WORK_PACKAGE_PATH: workPackagePath,
-      AGENT_BUS_RESULT_FILE_PATH: resultFilePath,
-      AGENT_BUS_LOG_FILE_PATH: logFilePath
-    }
   };
 }
 
@@ -300,13 +271,13 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
 
         const processResult = await runPreparedAdapterCommand({
           materializedRun,
-          execution: buildPreparedCommand(
+          execution: buildAdapterCommand({
             agent,
-            workPackage.workspace.workingDirectory,
-            materializedRun.workPackagePath,
-            materializedRun.resultFilePath,
-            materializedRun.logFilePath
-          )
+            workingDirectory: workPackage.workspace.workingDirectory,
+            workPackagePath: materializedRun.workPackagePath,
+            resultFilePath: materializedRun.resultFilePath,
+            logFilePath: materializedRun.logFilePath
+          })
         });
 
         if (!processResult.result) {
