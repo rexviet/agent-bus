@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { AgentBusManifest } from "../config/manifest-schema.js";
 import type { PreparedAdapterCommand } from "./process-runner.js";
+import { buildAntigravityCommand } from "./vendors/antigravity.js";
 import { buildCodexCommand } from "./vendors/codex.js";
 import { buildOpenCodeCommand } from "./vendors/open-code.js";
 
@@ -158,6 +159,6 @@ export function buildAdapterCommand(
     case "open-code":
       return buildOpenCodeCommand(vendorInput);
     case "antigravity":
-      return buildGenericManifestCommand(input);
+      return buildAntigravityCommand(vendorInput);
   }
 }
