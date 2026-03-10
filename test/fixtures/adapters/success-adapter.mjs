@@ -13,6 +13,12 @@ if (!workPackagePath || !resultFilePath) {
 }
 
 const workPackage = JSON.parse(await readFile(workPackagePath, "utf8"));
+const emittedTopic = workPackage.event.payload.nextTopic ?? "implementation_done";
+const emittedPayload =
+  workPackage.event.payload.emittedPayload &&
+  typeof workPackage.event.payload.emittedPayload === "object"
+    ? workPackage.event.payload.emittedPayload
+    : {};
 const outputRelativePath = path.posix.join(
   "generated",
   `${sanitizePathSegment(workPackage.delivery.deliveryId)}.md`
@@ -43,9 +49,10 @@ await writeFile(
       ],
       events: [
         {
-          topic: "implementation_done",
+          topic: emittedTopic,
           payload: {
-            sourceDeliveryId: workPackage.delivery.deliveryId
+            sourceDeliveryId: workPackage.delivery.deliveryId,
+            ...emittedPayload
           }
         }
       ]
