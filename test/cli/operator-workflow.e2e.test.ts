@@ -1,11 +1,15 @@
 import * as assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
+import { promisify } from "node:util";
 
 import { main } from "../../src/cli.js";
 import { startDaemon } from "../../src/daemon/index.js";
+
+const execFileAsync = promisify(execFile);
 
 interface CapturedRun {
   readonly exitCode: number;
@@ -211,5 +215,86 @@ test("operator workflow demo exercises publish, approval, failure inspection, re
     assert.match(failuresAfterReplay.stdout, /No failure deliveries found/);
     assert.match(await readFile(systemDesignPath, "utf8"), /System Design/);
     assert.match(await readFile(testCasesPath, "utf8"), /Test Cases/);
+  });
+});
+
+test("demo reset script clears runtime state so the workflow can be rerun deterministically", async () => {
+  await withDemoRepo(async (repositoryRoot, configRelativePath) => {
+    const publish = await runCli(
+      [
+        "publish",
+        "--config",
+        configRelativePath,
+        "--envelope",
+        "examples/operator-demo/envelopes/plan-done.json"
+      ],
+      repositoryRoot
+    );
+    const approve = await runCli(
+      [
+        "approvals",
+        "approve",
+        "approval:550e8400-e29b-41d4-a716-446655440801",
+        "--config",
+        configRelativePath,
+        "--by",
+        "human-demo"
+      ],
+      repositoryRoot
+    );
+    const firstRun = await runWorkerUntilIdle(
+      repositoryRoot,
+      configRelativePath,
+      "demo-reset-first"
+    );
+
+    assert.equal(publish.exitCode, 0);
+    assert.equal(approve.exitCode, 0);
+    assert.ok(firstRun.some((result) => result.status === "retryable_error"));
+
+    await execFileAsync(process.execPath, ["examples/operator-demo/reset-demo.mjs"], {
+      cwd: repositoryRoot
+    });
+
+    const republished = await runCli(
+      [
+        "publish",
+        "--config",
+        configRelativePath,
+        "--envelope",
+        "examples/operator-demo/envelopes/plan-done.json",
+        "--json"
+      ],
+      repositoryRoot
+    );
+    const reapproved = await runCli(
+      [
+        "approvals",
+        "approve",
+        "approval:550e8400-e29b-41d4-a716-446655440801",
+        "--config",
+        configRelativePath,
+        "--by",
+        "human-demo"
+      ],
+      repositoryRoot
+    );
+    const secondRun = await runWorkerUntilIdle(
+      repositoryRoot,
+      configRelativePath,
+      "demo-reset-second"
+    );
+
+    assert.equal(republished.exitCode, 0);
+    assert.equal(JSON.parse(republished.stdout).eventId, "550e8400-e29b-41d4-a716-446655440801");
+    assert.equal(reapproved.exitCode, 0);
+    assert.ok(
+      secondRun.some((result) => result.status === "retryable_error"),
+      "expected reset demo to reproduce the first-run QA failure"
+    );
+    assert.ok(
+      secondRun.some((result) => result.status === "success"),
+      "expected reset demo to reproduce the successful tech-lead delivery"
+    );
   });
 });

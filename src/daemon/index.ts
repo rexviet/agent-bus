@@ -35,6 +35,8 @@ export interface StartDaemonOptions {
   readonly configPath: string;
   readonly repositoryRoot?: string;
   readonly recoveryIntervalMs?: number;
+  readonly startRecoveryScan?: boolean;
+  readonly runRecoveryScanOnStart?: boolean;
   readonly registerSignalHandlers?: boolean;
   readonly databasePath?: string;
 }
@@ -152,10 +154,13 @@ export async function startDaemon(
     approvalStore,
     eventStore,
     deliveryStore,
+    runStore,
     dispatcher
   });
   const deliveryService = createDeliveryService({
     deliveryStore,
+    eventStore,
+    runStore,
     dispatcher
   });
   const adapterWorker = createAdapterWorker({
@@ -171,6 +176,7 @@ export async function startDaemon(
   const replayService = createReplayService({
     eventStore,
     deliveryStore,
+    runStore,
     dispatcher
   });
   const operatorService = createOperatorService({
@@ -182,14 +188,21 @@ export async function startDaemon(
   const recoveryScan = createRecoveryScan({
     approvalStore,
     deliveryStore,
+    eventStore,
+    runStore,
     dispatcher,
     ...(options.recoveryIntervalMs !== undefined
       ? { intervalMs: options.recoveryIntervalMs }
       : {})
   });
 
-  recoveryScan.start();
-  recoveryScan.runOnce();
+  if (options.startRecoveryScan !== false) {
+    recoveryScan.start();
+  }
+
+  if (options.runRecoveryScanOnStart !== false) {
+    recoveryScan.runOnce();
+  }
 
   let signalCleanup = (): void => {};
   let stopped = false;

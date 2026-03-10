@@ -1,13 +1,13 @@
 # STATE.md
 
 > **Current Phase**: 4 - Operator Workflow (completed)
-> **Current Focus**: Phase 4 executed and verified on `feature/phase-4-operator-workflow`; awaiting PR review
+> **Current Focus**: Phase 4 review fixes landed on `feature/phase-4-operator-workflow`; awaiting refreshed PR review
 > **Last Updated**: 2026-03-10
 
 ## Current Position
 - **Phase**: 4 - Operator Workflow (completed)
 - **Task**: All plans complete
-- **Status**: Verified at 2026-03-10 15:15 +07
+- **Status**: Review fixes verified at 2026-03-10 15:45 +07
 
 ## Active Work
 - Phase 1.1 completed
@@ -33,13 +33,13 @@
 - Phase 4 verification completed
 
 ## Last Session Summary
-Phase 4 is complete on branch `feature/phase-4-operator-workflow`. The repository now has daemon-backed operator read models, CLI commands for run inspection, approvals, failures, replay, and file-backed publish, plus a deterministic end-to-end operator demo and verification suite.
+Phase 4 remains complete on branch `feature/phase-4-operator-workflow`, and the follow-up review fixes are now in place. Operator read commands no longer trigger recovery mutations, run `updatedAt` advances with durable workflow mutations, and the deterministic demo can be reset and rerun without manual SQLite cleanup.
 
 ## In-Progress Work
-Product code for Phase 4 is complete and verified.
+Product code for Phase 4 is complete and verified, including post-review fixes.
 - Branch: `feature/phase-4-operator-workflow`
-- Files modified: CLI/operator surface, demo assets, `.gsd/phases/4/*`, `.gsd/ROADMAP.md`, `.gsd/STATE.md`, `.gsd/JOURNAL.md`
-- Tests status: `npm test` passed on Node `22.12.0` with `57/57` tests; manifest validation passed for `agent-bus.example.yaml`, `agent-bus.yaml`, and `examples/operator-demo/agent-bus.demo.yaml`
+- Files modified: CLI/operator surface, daemon mutation paths, demo assets, and `.gsd` handoff files
+- Tests status: `npm test` passed on Node `22.12.0` with `61/61` tests; manifest validation passed for `agent-bus.example.yaml`, `agent-bus.yaml`, and `examples/operator-demo/agent-bus.demo.yaml`
 
 ## Blockers
 No active implementation blocker.
@@ -72,7 +72,7 @@ Critical context that would be lost:
 - Re-reviewed the Phase 3 branch after fixing the lease-expiry race and publish-before-ack bug; no remaining blocking findings were found before PR `#6` was merged.
 
 ### Current Hypothesis
-The implementation work is done; the next step is to review and merge the Phase 4 execution PR after CI passes.
+The implementation work is done; the next step is to re-review and merge the Phase 4 execution PR after CI passes on the review-fix commit.
 
 ### Files of Interest
 - `.gsd/phases/4/VERIFICATION.md`: Phase 4 requirement verification and closing evidence.
@@ -84,10 +84,11 @@ The implementation work is done; the next step is to review and merge the Phase 
 - `src/daemon/operator-service.ts`: daemon-owned operator read models for runs, approvals, and failures.
 - `src/cli.ts`, `src/cli/operator-command.ts`, `src/cli/output.ts`, `src/cli/load-envelope.ts`: the Phase 4 operator CLI surface.
 - `examples/operator-demo/agent-bus.demo.yaml`: deterministic demo manifest.
+- `examples/operator-demo/reset-demo.mjs`: clears demo runtime state so the fixed seed envelope can be rerun.
 - `test/cli/operator-read.test.ts`, `test/cli/operator-mutate.test.ts`, `test/cli/operator-workflow.e2e.test.ts`: CLI-level verification for read, mutate, and end-to-end operator workflows.
 
 ## Next Steps
-1. Review the Phase 4 execution PR and CI results
+1. Review the updated Phase 4 execution PR and CI results
 2. Merge after approval
 3. Decide whether to codify Node `22.12.0` with `.nvmrc` or Volta
 

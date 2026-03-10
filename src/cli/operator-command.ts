@@ -104,6 +104,8 @@ async function withDaemon<T>(
   const daemon = await startDaemon({
     configPath: absoluteConfigPath,
     repositoryRoot: io.cwd,
+    startRecoveryScan: false,
+    runRecoveryScanOnStart: false,
     registerSignalHandlers: false
   });
 

@@ -3,12 +3,14 @@ import type { PersistedEventRecord } from "../storage/event-store.js";
 import type { Dispatcher } from "./dispatcher.js";
 import type {
   ReturnTypeOfCreateDeliveryStore,
-  ReturnTypeOfCreateEventStore
+  ReturnTypeOfCreateEventStore,
+  ReturnTypeOfCreateRunStore
 } from "./types.js";
 
 export interface ReplayServiceOptions {
   readonly eventStore: ReturnTypeOfCreateEventStore;
   readonly deliveryStore: ReturnTypeOfCreateDeliveryStore;
+  readonly runStore: ReturnTypeOfCreateRunStore;
   readonly dispatcher: Dispatcher;
 }
 
@@ -30,6 +32,7 @@ function requireReplayableEvent(event: PersistedEventRecord): PersistedEventReco
 export function createReplayService({
   eventStore,
   deliveryStore,
+  runStore,
   dispatcher
 }: ReplayServiceOptions) {
   return {
@@ -53,6 +56,7 @@ export function createReplayService({
         ...(availableAt ? { availableAt } : {})
       });
 
+      runStore.touchRun(event.runId);
       dispatcher.handleReadyDelivery(delivery);
 
       return delivery;
@@ -72,6 +76,7 @@ export function createReplayService({
         availableAt
       );
 
+      runStore.touchRun(event.runId);
       for (const delivery of deliveries) {
         dispatcher.handleReadyDelivery(delivery);
       }

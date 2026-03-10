@@ -11,6 +11,12 @@ This repository ships a deterministic Phase 4 operator demo. It exercises the op
 
 The demo workspace is isolated under `examples/operator-demo/workspace`, while runtime state and logs are isolated under `.agent-bus/demo-state` and `.agent-bus/demo-logs`.
 
+If you have already run the demo once, reset it before rerunning the fixed seed envelope:
+
+```bash
+node examples/operator-demo/reset-demo.mjs
+```
+
 ## Prerequisites
 
 Run all npm commands on Node `22.12.0`:
@@ -79,3 +85,5 @@ node --experimental-sqlite dist/cli.js runs show run-demo-001 \
 - `examples/operator-demo/workspace/docs/test-cases.md`
 
 The final `runs show run-demo-001` output should report a `completed` run status, and `failures list` should report no remaining failure deliveries after replay and the final worker pass.
+
+The reset script clears the demo SQLite state, logs, and generated output artifacts so the same seed envelope can be published again without manual cleanup.

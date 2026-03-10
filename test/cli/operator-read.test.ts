@@ -2,6 +2,7 @@ import * as assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
 import { main } from "../../src/cli.js";
@@ -28,6 +29,46 @@ function createCaptureStream() {
       return output;
     }
   };
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function readSingleDeliveryState(databasePath: string): {
+  readonly status: string;
+  readonly availableAt: string;
+  readonly leaseExpiresAt: string | null;
+} {
+  const database = new DatabaseSync(databasePath);
+
+  try {
+    const row = database
+      .prepare(`
+        SELECT status, available_at, lease_expires_at
+        FROM deliveries
+        LIMIT 1
+      `)
+      .get() as
+      | {
+          status: string;
+          available_at: string;
+          lease_expires_at: string | null;
+        }
+      | undefined;
+
+    if (!row) {
+      throw new Error(`No delivery rows found in ${databasePath}.`);
+    }
+
+    return {
+      status: row.status,
+      availableAt: row.available_at,
+      leaseExpiresAt: row.lease_expires_at
+    };
+  } finally {
+    database.close();
+  }
 }
 
 async function runCli(
@@ -213,5 +254,120 @@ test("operator CLI returns clear errors for missing runs and unknown subcommands
     assert.match(missingRun.stderr, /Run not found: missing-run/);
     assert.equal(unknownSubcommand.exitCode, 1);
     assert.match(unknownSubcommand.stderr, /Unknown runs subcommand: inspect/);
+  });
+});
+
+test("read-only operator commands do not reclaim expired leases on startup", async () => {
+  await withTempRepo(async (configPath, repositoryRoot) => {
+    const daemon = await startDaemon({
+      configPath,
+      repositoryRoot,
+      registerSignalHandlers: false,
+      recoveryIntervalMs: 5_000
+    });
+
+    try {
+      daemon.publish(
+        parseEventEnvelope({
+          eventId: "550e8400-e29b-41d4-a716-446655440603",
+          topic: "implementation_ready",
+          runId: "run-cli-readonly",
+          correlationId: "run-cli-readonly",
+          dedupeKey: "implementation_ready:run-cli-readonly",
+          occurredAt: "2026-03-09T18:10:00Z",
+          producer: {
+            agentId: "tech_lead_claude",
+            runtime: "claude-code"
+          },
+          payload: {},
+          payloadMetadata: {},
+          artifactRefs: []
+        })
+      );
+
+      const claimed = daemon.claimDelivery("worker-readonly", 1);
+
+      assert.ok(claimed);
+    } finally {
+      await daemon.stop();
+    }
+
+    await delay(20);
+
+    const databasePath = path.join(repositoryRoot, ".agent-bus/state/agent-bus.sqlite");
+    const before = readSingleDeliveryState(databasePath);
+    const runsList = await runCli(["runs", "list"], repositoryRoot);
+    const after = readSingleDeliveryState(databasePath);
+
+    assert.equal(runsList.exitCode, 0);
+    assert.equal(before.status, "leased");
+    assert.equal(after.status, "leased");
+    assert.equal(after.availableAt, before.availableAt);
+    assert.equal(after.leaseExpiresAt, before.leaseExpiresAt);
+  });
+});
+
+test("run detail updatedAt advances after daemon mutations", async () => {
+  await withTempRepo(async (configPath, repositoryRoot) => {
+    const daemon = await startDaemon({
+      configPath,
+      repositoryRoot,
+      registerSignalHandlers: false,
+      recoveryIntervalMs: 5_000
+    });
+
+    try {
+      daemon.publish(
+        parseEventEnvelope({
+          eventId: "550e8400-e29b-41d4-a716-446655440604",
+          topic: "implementation_ready",
+          runId: "run-cli-updated-at",
+          correlationId: "run-cli-updated-at",
+          dedupeKey: "implementation_ready:run-cli-updated-at",
+          occurredAt: "2026-03-09T18:15:00Z",
+          producer: {
+            agentId: "tech_lead_claude",
+            runtime: "claude-code"
+          },
+          payload: {},
+          payloadMetadata: {},
+          artifactRefs: []
+        })
+      );
+
+      await delay(20);
+
+      const claimed = daemon.claimDelivery("worker-updated-at", 60_000);
+
+      assert.ok(claimed);
+
+      await delay(20);
+
+      daemon.failDelivery(
+        claimed?.deliveryId as string,
+        claimed?.leaseToken as string,
+        "simulated retry path",
+        0
+      );
+    } finally {
+      await daemon.stop();
+    }
+
+    const runDetail = await runCli(
+      ["runs", "show", "run-cli-updated-at", "--json"],
+      repositoryRoot
+    );
+    const detail = JSON.parse(runDetail.stdout) as {
+      readonly createdAt: string;
+      readonly updatedAt: string;
+      readonly deliveries: readonly { readonly status: string }[];
+    };
+
+    assert.equal(runDetail.exitCode, 0);
+    assert.equal(detail.deliveries[0]?.status, "retry_scheduled");
+    assert.ok(
+      detail.updatedAt > detail.createdAt,
+      `expected updatedAt ${detail.updatedAt} to advance beyond createdAt ${detail.createdAt}`
+    );
   });
 });

@@ -20,6 +20,15 @@ export interface ListRunsOptions {
   readonly limit?: number;
 }
 
+function nextUpdatedAt(currentUpdatedAt: string): string {
+  const currentTime = Date.parse(currentUpdatedAt);
+  const now = Date.now();
+
+  return new Date(
+    Number.isNaN(currentTime) ? now : Math.max(now, currentTime + 1)
+  ).toISOString();
+}
+
 interface RunRow {
   run_id: string;
   status: RunStatus;
@@ -54,6 +63,11 @@ export function createRunStore(database: DatabaseSync) {
     ORDER BY created_at DESC, run_id DESC
     LIMIT ?
   `);
+  const touchRun = database.prepare(`
+    UPDATE runs
+    SET updated_at = ?
+    WHERE run_id = ?
+  `);
 
   return {
     createRun(input: CreateRunInput): RunRecord {
@@ -83,6 +97,29 @@ export function createRunStore(database: DatabaseSync) {
       const rows = selectRuns.all(limit) as unknown as RunRow[];
 
       return rows.map(mapRunRow);
+    },
+
+    touchRun(runId: string): RunRecord {
+      const current = selectRun.get(runId) as RunRow | undefined;
+
+      if (!current) {
+        throw new Error(`Run not found for ${runId}.`);
+      }
+
+      const updatedAt = nextUpdatedAt(current.updated_at);
+      const result = touchRun.run(updatedAt, runId) as { changes?: number };
+
+      if (!result.changes) {
+        throw new Error(`Failed to update run ${runId}.`);
+      }
+
+      const touched = selectRun.get(runId) as RunRow | undefined;
+
+      if (!touched) {
+        throw new Error(`Failed to load run ${runId} after update.`);
+      }
+
+      return mapRunRow(touched);
     }
   };
 }

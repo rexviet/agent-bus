@@ -2,6 +2,28 @@
 
 ## Entries
 
+## Session: 2026-03-10 15:45
+
+### Objective
+Fix the three blocking Phase 4 review findings and update the execution PR with verification.
+
+### Accomplished
+- Disabled recovery startup for operator CLI commands so `runs`, `approvals`, `failures`, `replay`, and `publish` no longer mutate unrelated durable state just by booting the daemon.
+- Added `runStore.touchRun()` and wired it through publish, approval, replay, delivery, and recovery paths so operator-visible run `updatedAt` now advances with durable workflow mutations.
+- Added a demo reset script, updated the operator demo walkthrough, and ignored demo state/log directories so the deterministic seed workflow can be rerun without manual SQLite cleanup or worktree noise.
+- Added regression coverage for read-only CLI startup behavior, run `updatedAt`, demo reset repeatability, and monotonic run timestamp updates.
+
+### Verification
+- [x] `npm test` passed with `61/61` tests
+- [x] `npm run build && node --experimental-sqlite dist/cli.js validate-manifest agent-bus.example.yaml && node --experimental-sqlite dist/cli.js validate-manifest agent-bus.yaml && node --experimental-sqlite dist/cli.js validate-manifest examples/operator-demo/agent-bus.demo.yaml` passed
+- [x] New regression tests passed for read-only CLI startup, run timestamp freshness, and demo reset repeatability
+
+### Paused Because
+The code fixes and verification are complete; the next meaningful step is to push the branch and let CI refresh on the PR.
+
+### Handoff Notes
+The branch remains `feature/phase-4-operator-workflow`. The key follow-up is procedural: push the review-fix commit, confirm CI stays green, and merge only after refreshed approval on the updated PR.
+
 ## Session: 2026-03-10 15:15
 
 ### Objective

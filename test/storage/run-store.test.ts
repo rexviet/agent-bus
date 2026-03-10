@@ -58,3 +58,32 @@ test("run store lists recent runs in descending creation order", async () => {
     }
   });
 });
+
+test("run store touchRun advances updatedAt monotonically", async () => {
+  await withTempDatabase(async (databasePath) => {
+    const database = openSqliteDatabase({ databasePath });
+
+    try {
+      await migrateDatabase(database);
+
+      const runStore = createRunStore(database);
+      const created = runStore.createRun({
+        runId: "run-touch-001",
+        status: "active"
+      });
+      const firstTouch = runStore.touchRun("run-touch-001");
+      const secondTouch = runStore.touchRun("run-touch-001");
+
+      assert.ok(
+        firstTouch.updatedAt > created.updatedAt,
+        `expected first touch ${firstTouch.updatedAt} to advance beyond ${created.updatedAt}`
+      );
+      assert.ok(
+        secondTouch.updatedAt > firstTouch.updatedAt,
+        `expected second touch ${secondTouch.updatedAt} to advance beyond ${firstTouch.updatedAt}`
+      );
+    } finally {
+      database.close();
+    }
+  });
+});
