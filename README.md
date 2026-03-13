@@ -219,6 +219,23 @@ npm install
 npm run build
 ```
 
+### Global CLI For Local Development
+
+This repository is not published as a public npm package yet, but you can still expose a real global `agent-bus` binary from your local checkout:
+
+```bash
+npm run link:global
+agent-bus --help
+```
+
+The linked `agent-bus` wrapper resolves `dist/cli.js` from this repository and runs it with `node --experimental-sqlite`. If your current `node` is older than `22.12.0`, it will try to load `nvm` and switch to the version declared in `.nvmrc` automatically.
+
+To remove the global link later:
+
+```bash
+npm run unlink:global
+```
+
 ### Validate The Build
 
 ```bash
@@ -355,6 +372,7 @@ The current CLI surface is operator-focused.
 
 ```text
 agent-bus daemon [--config path] [--exit-after-ready]
+agent-bus worker [--config path] [--worker-id id] [--lease-duration-ms N] [--poll-interval-ms N] [--retry-delay-ms N] [--once]
 agent-bus layout [--config path] [--ensure]
 agent-bus validate-manifest [path]
 agent-bus runs <subcommand>
@@ -423,11 +441,34 @@ node --experimental-sqlite dist/cli.js replay delivery <delivery-id> --config ag
 node --experimental-sqlite dist/cli.js replay event <event-id> --config agent-bus.yaml
 ```
 
+### Run A Worker
+
+Use `worker` when you want the CLI itself to claim and execute ready deliveries without writing a custom Node harness.
+
+Run continuously:
+
+```bash
+node --experimental-sqlite dist/cli.js worker \
+  --config agent-bus.yaml \
+  --worker-id worker-1
+```
+
+Run a single iteration and exit:
+
+```bash
+node --experimental-sqlite dist/cli.js worker \
+  --config agent-bus.yaml \
+  --worker-id worker-1 \
+  --once
+```
+
+The worker loop claims one ready delivery at a time, materializes a work package, launches the target adapter command, and records the delivery result back into SQLite.
+
 ## Programmatic Worker Execution
 
-Today, actual worker iterations are exposed through the daemon API.
+The daemon API still exposes `runWorkerIteration(...)` directly if you want to embed Agent Bus in custom tooling.
 
-That means the CLI is already good for operator workflows, but embedding code or a harness typically drives execution with `runWorkerIteration(...)`.
+That is useful for advanced integration, but it is no longer required for normal local execution.
 
 Example:
 
@@ -448,7 +489,7 @@ try {
 }
 ```
 
-This is the current honest shape of the project: durable orchestration and operator tooling are in place, while worker execution is still primarily library-driven rather than exposed as a dedicated standalone worker CLI.
+The CLI worker is a thin loop over the same daemon API, so both surfaces share the same execution behavior.
 
 ## Quick Start With The Included Example
 
@@ -466,10 +507,10 @@ At a high level:
 2. publish the demo envelope
 3. inspect the pending approval
 4. approve it
-5. run worker iterations through a short harness
+5. run the worker CLI
 6. inspect failures
 7. replay the failed delivery
-8. run one more iteration
+8. run one more worker iteration
 9. inspect the final run state
 
 If you already ran the demo once, reset it with:
@@ -521,4 +562,3 @@ The current implementation covers:
 - [`src/config/manifest-schema.ts`](src/config/manifest-schema.ts)
 - [`src/domain/event-envelope.ts`](src/domain/event-envelope.ts)
 - [`src/adapters/contract.ts`](src/adapters/contract.ts)
-

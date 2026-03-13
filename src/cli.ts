@@ -7,6 +7,7 @@ import {
 } from "./shared/runtime-layout.js";
 import { loadManifest, ManifestValidationError } from "./config/load-manifest.js";
 import { runOperatorCommand } from "./cli/operator-command.js";
+import { runWorkerCommand } from "./cli/worker-command.js";
 import type { WritableTextStream } from "./cli/output.js";
 
 const HELP_TEXT = `agent-bus
@@ -14,6 +15,7 @@ const HELP_TEXT = `agent-bus
 Usage:
   agent-bus --help
   agent-bus daemon [--config path] [--exit-after-ready]
+  agent-bus worker [--config path] [--worker-id id] [--lease-duration-ms N] [--poll-interval-ms N] [--retry-delay-ms N] [--once]
   agent-bus layout [--config path] [--ensure]
   agent-bus validate-manifest [path]
   agent-bus runs <subcommand>
@@ -24,6 +26,7 @@ Usage:
 
 Commands:
   daemon         Start the local dispatcher process
+  worker         Run a local worker loop that claims and executes deliveries
   layout          Print resolved runtime directories
   validate-manifest
                  Validate a workflow manifest file
@@ -143,6 +146,14 @@ export async function main(
     }
 
     return 0;
+  }
+
+  if (command === "worker") {
+    return runWorkerCommand(argv.slice(1), {
+      cwd,
+      stdout,
+      stderr
+    });
   }
 
   if (command && ["runs", "approvals", "failures", "replay", "publish"].includes(command)) {

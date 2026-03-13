@@ -53,7 +53,16 @@ node --experimental-sqlite dist/cli.js approvals approve \
   --by human-demo
 ```
 
-4. Start a short-lived daemon shell or test harness and run worker iterations until the first failure is recorded. The deterministic fixture produces one successful system-design artifact and one retryable QA failure.
+4. Run the worker CLI until the first failure is recorded. The deterministic fixture produces one successful system-design artifact and one retryable QA failure:
+
+```bash
+node --experimental-sqlite dist/cli.js worker \
+  --config examples/operator-demo/agent-bus.demo.yaml \
+  --worker-id demo-worker \
+  --once
+```
+
+Run the same command a second time to process the other ready delivery. After the second pass, `system-design.md` is generated and the QA delivery is moved to `retry_scheduled`.
 
 5. Inspect failures:
 
@@ -70,7 +79,14 @@ node --experimental-sqlite dist/cli.js replay delivery \
   --config examples/operator-demo/agent-bus.demo.yaml
 ```
 
-7. Run one more worker iteration. The replayed QA delivery succeeds and writes `examples/operator-demo/workspace/docs/test-cases.md`.
+7. Run one more worker iteration. The replayed QA delivery succeeds and writes `examples/operator-demo/workspace/docs/test-cases.md`:
+
+```bash
+node --experimental-sqlite dist/cli.js worker \
+  --config examples/operator-demo/agent-bus.demo.yaml \
+  --worker-id demo-worker \
+  --once
+```
 
 8. Inspect the final run state:
 

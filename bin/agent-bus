@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MIN_NODE_MAJOR=22
+MIN_NODE_MINOR=12
+
+resolve_script_path() {
+  local source_path="$1"
+
+  while [ -L "$source_path" ]; do
+    local source_dir
+    source_dir="$(cd -P "$(dirname "$source_path")" && pwd)"
+    source_path="$(readlink "$source_path")"
+
+    if [[ "$source_path" != /* ]]; then
+      source_path="$source_dir/$source_path"
+    fi
+  done
+
+  cd -P "$(dirname "$source_path")" && pwd
+}
+
+version_satisfies_requirement() {
+  local version="$1"
+  local major minor patch
+  IFS=. read -r major minor patch <<<"$version"
+
+  if (( major > MIN_NODE_MAJOR )); then
+    return 0
+  fi
+
+  if (( major == MIN_NODE_MAJOR && minor >= MIN_NODE_MINOR )); then
+    return 0
+  fi
+
+  return 1
+}
+
+SCRIPT_DIR="$(resolve_script_path "${BASH_SOURCE[0]}")"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CLI_PATH="$REPO_ROOT/dist/cli.js"
+TARGET_NODE_VERSION="${AGENT_BUS_NODE_VERSION:-}"
+
+if [ -z "$TARGET_NODE_VERSION" ] && [ -f "$REPO_ROOT/.nvmrc" ]; then
+  TARGET_NODE_VERSION="$(tr -d '[:space:]' < "$REPO_ROOT/.nvmrc")"
+fi
+
+TARGET_NODE_VERSION="${TARGET_NODE_VERSION:-22.12.0}"
+
+if [ ! -f "$CLI_PATH" ]; then
+  echo "agent-bus is not built. Run 'npm install' and 'npm run build' in $REPO_ROOT." >&2
+  exit 1
+fi
+
+CURRENT_NODE_VERSION=""
+
+if command -v node >/dev/null 2>&1; then
+  CURRENT_NODE_VERSION="$(node -p 'process.versions.node' 2>/dev/null || true)"
+fi
+
+if [ -n "$CURRENT_NODE_VERSION" ] && version_satisfies_requirement "$CURRENT_NODE_VERSION"; then
+  exec node --experimental-sqlite "$CLI_PATH" "$@"
+fi
+
+NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+
+if [ -s "$NVM_DIR/nvm.sh" ]; then
+  # shellcheck disable=SC1090
+  . "$NVM_DIR/nvm.sh"
+
+  if nvm ls "$TARGET_NODE_VERSION" >/dev/null 2>&1; then
+    nvm use --silent "$TARGET_NODE_VERSION" >/dev/null
+    exec node --experimental-sqlite "$CLI_PATH" "$@"
+  fi
+
+  echo "agent-bus requires Node >=22.12.0. Install it first with: nvm install $TARGET_NODE_VERSION" >&2
+  exit 1
+fi
+
+if [ -n "$CURRENT_NODE_VERSION" ]; then
+  echo "agent-bus requires Node >=22.12.0, but the current node is $CURRENT_NODE_VERSION and nvm was not found." >&2
+else
+  echo "agent-bus requires Node >=22.12.0 and could not find a usable node binary." >&2
+fi
+
+exit 1
