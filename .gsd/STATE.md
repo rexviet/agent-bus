@@ -1,45 +1,29 @@
 # STATE.md
 
-> **Current Phase**: 4 - Operator Workflow (completed)
-> **Current Focus**: Phase 4 review fixes landed on `feature/phase-4-operator-workflow`; awaiting refreshed PR review
+> **Current Phase**: Milestone Planning
+> **Current Focus**: Drafting `v1.1` to extract backend abstraction boundaries while keeping the SQLite local-first runtime as the stable default
 > **Last Updated**: 2026-03-10
 
 ## Current Position
-- **Phase**: 4 - Operator Workflow (completed)
-- **Task**: All plans complete
-- **Status**: Review fixes verified at 2026-03-10 15:45 +07
+- **Milestone**: v1.1
+- **Phase**: Not started
+- **Task**: Milestone drafted; Phase 1 planning pending
+- **Status**: Milestone planned (drafted 2026-03-10 17:12 +07)
 
 ## Active Work
-- Phase 1.1 completed
-- Phase 1.2 completed
-- Phase 1.3 completed
-- Phase 1.4 completed
-- Phase 2.1 completed
-- Phase 2.2 completed
-- Phase 2.3 completed
-- Phase 2.4 completed
-- Phase 3 research completed
-- Phase 3.1 completed
-- Phase 3.2 completed
-- Phase 3.3 completed
-- Phase 3.4 completed
-- Phase 3 verification completed
-- Phase 3 merged to `main`
-- Phase 4 research completed
-- Phase 4.1 completed
-- Phase 4.2 completed
-- Phase 4.3 completed
-- Phase 4.4 completed
-- Phase 4 verification completed
+- `v1.0` remains complete and is the baseline behavior to preserve.
+- `v1.1` is drafted as an architecture milestone for backend abstraction, not a distributed-backend implementation milestone.
+- The current branch `feature/pause-session-handoff` still only carries docs and handoff updates; implementation for `v1.1` should begin on a fresh working branch.
 
 ## Last Session Summary
-Phase 4 remains complete on branch `feature/phase-4-operator-workflow`, and the follow-up review fixes are now in place. Operator read commands no longer trigger recovery mutations, run `updatedAt` advances with durable workflow mutations, and the deterministic demo can be reset and rerun without manual SQLite cleanup.
+The repository finished `v1.0` with operator workflow and README work already merged on `main`. This session starts the next milestone definition, focused on separating workflow semantics from storage and dispatch implementation details so future backends can be added without destabilizing the current SQLite runtime.
 
 ## In-Progress Work
-Product code for Phase 4 is complete and verified, including post-review fixes.
-- Branch: `feature/phase-4-operator-workflow`
-- Files modified: CLI/operator surface, daemon mutation paths, demo assets, and `.gsd` handoff files
-- Tests status: `npm test` passed on Node `22.12.0` with `61/61` tests; manifest validation passed for `agent-bus.example.yaml`, `agent-bus.yaml`, and `examples/operator-demo/agent-bus.demo.yaml`
+No `v1.1` implementation has started yet.
+- Branch: `feature/pause-session-handoff`
+- Milestone status: drafted only
+- Tests status: unchanged from the latest known `v1.0` verification: `npm test` with `61/61` passing tests plus manifest validation for `agent-bus.example.yaml`, `agent-bus.yaml`, and `examples/operator-demo/agent-bus.demo.yaml`
+- Local workspace note: additional docs-only demo prompt files exist under `examples/operator-demo/agents-demo/`
 
 ## Blockers
 No active implementation blocker.
@@ -48,58 +32,31 @@ No active implementation blocker.
 Critical context that would be lost:
 
 ### Decisions Made
-- Replay must respect approval state: replay is allowed only for events with `approvalStatus` of `approved` or `not_required`, because replaying rejected work bypasses the product's human-gate contract.
-- Replay must reset execution state: `attemptCount`, lease fields, and terminal timestamps are cleared on replay so replayed work starts with a fresh retry budget and coherent audit metadata.
-- Node runtime baseline remains `22.12.0+`: local failures on older environments were caused by the repo's use of `node --experimental-sqlite`.
-- Phase 3 uses a file-backed adapter contract: the daemon writes a work package and reads a result envelope, so runtime workers never touch SQLite directly.
-- Fatal adapter failures dead-letter immediately, while retryable failures reschedule with explicit retry delays; clean exits without a result envelope are treated as process-level contract failures.
-- Runtime invocation is vendor-specific behind a shared contract: `codex exec`, `opencode run`, and `antigravity chat --mode agent` are isolated in adapter modules instead of hardcoded in daemon logic.
-- The shipped manifests now use real runtime command shapes instead of stale placeholders, so repository examples match the current adapter layer.
-- The Open Code binary on this machine is `opencode`, so the adapter layer must absorb binary-name drift while preserving stable manifest runtime identities.
-- The stale-lease and emitted-event atomicity bugs found in review were fixed before merge: follow-up events now persist atomically with parent acknowledgement, and lease expiry no longer crashes the worker path.
-- Phase 4 will add a daemon-owned operator service instead of letting CLI commands query SQLite directly.
-- Phase 4 run visibility should derive summary state from persisted events and deliveries instead of relying on the currently static `runs.status` field.
-- Phase 4 operator commands should support both concise text output and `--json`, with a thin `publish --envelope` bootstrap instead of a flag-heavy event builder.
-- Phase 4 demo verification should use deterministic fixture agents and generic manifest commands, not authenticated external runtimes.
-- Nested `--config` paths must still resolve workspace and state directories relative to the caller's repository root, not the config file's parent directory.
+- `v1.1` is about abstraction boundaries, not shipping a Node server, API layer, MCP surface, or Kafka-backed runtime yet.
+- SQLite and the local daemon remain required working defaults throughout this milestone.
+- The manifest, envelope schema, CLI semantics, operator demo, and repository-local artifact model must remain stable while the internals are refactored.
 
 ### Approaches Tried
-- Froze the shared adapter contract first with schema and path-safety tests before wiring any runtime execution.
-- Added a daemon-owned process runner and worker loop with deterministic fixture adapters covering success, retryable failure, fatal failure, and emitted-event fan-out.
-- Implemented vendor-specific builders for `codex`, `opencode`, and `antigravity` while preserving a generic manifest-command fallback for custom wrappers and fixtures.
-- Updated the shipped manifests to match real runtime command shapes and validated them through the compiled CLI.
-- Proved end-to-end artifact handoff across codex, open-code, and antigravity identities in a temporary local repository and kept smoke checks availability-aware for external CLIs.
-- Re-reviewed the Phase 3 branch after fixing the lease-expiry race and publish-before-ack bug; no remaining blocking findings were found before PR `#6` was merged.
+- Grounded the milestone in the existing SPEC constraints for one-machine, one-repository, local-first execution.
+- Derived the milestone phases from the architecture discussion: backend contracts first, then SQLite extraction, then dispatch isolation, then conformance coverage, then future-backend documentation.
 
 ### Current Hypothesis
-The implementation work is done; the next step is to re-review and merge the Phase 4 execution PR after CI passes on the review-fix commit.
+The safest path to future multi-backend support is to separate domain workflow semantics from backend mechanics before introducing any distributed control plane. If the contracts and conformance suite are solid, a later server or broker backend can be added without redesigning the protocol.
 
 ### Files of Interest
-- `.gsd/phases/4/VERIFICATION.md`: Phase 4 requirement verification and closing evidence.
-- `.gsd/phases/4/RESEARCH.md`: Phase 4 design decisions and operator-surface constraints.
-- `.gsd/phases/4/01-PLAN.md`: read-model and daemon operator-service work.
-- `.gsd/phases/4/02-PLAN.md`: read-only operator CLI commands.
-- `.gsd/phases/4/03-PLAN.md`: approval, rejection, replay, and publish bootstrap CLI commands.
-- `.gsd/phases/4/04-PLAN.md`: deterministic end-to-end operator demo workflow.
-- `src/daemon/operator-service.ts`: daemon-owned operator read models for runs, approvals, and failures.
-- `src/cli.ts`, `src/cli/operator-command.ts`, `src/cli/output.ts`, `src/cli/load-envelope.ts`: the Phase 4 operator CLI surface.
-- `examples/operator-demo/agent-bus.demo.yaml`: deterministic demo manifest.
-- `examples/operator-demo/reset-demo.mjs`: clears demo runtime state so the fixed seed envelope can be rerun.
-- `test/cli/operator-read.test.ts`, `test/cli/operator-mutate.test.ts`, `test/cli/operator-workflow.e2e.test.ts`: CLI-level verification for read, mutate, and end-to-end operator workflows.
+- `.gsd/SPEC.md`: current product constraints and non-goals
+- `.gsd/ROADMAP.md`: drafted `v1.1` milestone and phase breakdown
+- `src/daemon/`: orchestration, approval, replay, dispatch, and worker logic that currently mixes domain and backend concerns
+- `src/storage/`: SQLite-specific repositories that will need contract extraction
+- `src/cli/`: operator surface that must remain compatible throughout the refactor
 
 ## Next Steps
-1. Review the updated Phase 4 execution PR and CI results
-2. Merge after approval
-3. Decide whether to codify Node `22.12.0` with `.nvmrc` or Volta
+1. Review and refine the drafted `v1.1` scope and phase order.
+2. Run `/plan 1` to research and break down Phase 1 backend contracts.
+3. Start `v1.1` implementation on a fresh branch once the milestone draft is accepted.
 
 ## Notes
 - Project initialized through `/new-project`.
-- Phase 1 planning assumes TypeScript on Node 22, a root `agent-bus.yaml` manifest, `workspace/` for artifacts, and `.agent-bus/` for internal state.
-- Plan 1.1 completed with commits `23ca023` and `a49257f`.
-- Plan 1.2 completed with commits `3240c3a`, `7935dce`, and `f4a29f0`.
-- Plan 1.3 completed with commits `8368569`, `1a926c0`, and `b08ea22`.
-- Plan 1.4 completed with commits `e39b675`, `e6e3d31`, and `300b997`.
-- Phase 2 execution completed with commits `8aefba6`, `7babd78`, `1e87746`, `31a930b`, `5cb0d1d`, `a0293c4`, `95c8076`, `a65f3f1`, and `48c3779`.
-- Replay invariant fixes landed in commit `10a87f7` and were merged before PR `#1` was merged into PR `#3`.
-- Phase 3 execution completed on branch `feature/phase-3-runtime-adapters`; see `.gsd/phases/3/*-SUMMARY.md` and `.gsd/phases/3/VERIFICATION.md` for per-plan commit and evidence details.
-- PR `#6` merged Phase 3 into `main` at merge commit `b97691f`; the feature branch was deleted locally and remotely after sync.
+- The repository baseline remains Node `22.12.0+`; run `nvm use v22.12.0` before any `npm` command.
+- `v1.0` remains the reference behavior; do not regress the deterministic operator demo or the current CLI workflow while extracting abstractions.
+- Future backends should preserve the repository-authored manifest and event-envelope contract rather than redefining the workflow model.
