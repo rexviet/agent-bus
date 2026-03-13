@@ -19,14 +19,11 @@ agents:
       - run
       - --mode
       - design
-  - id: qa_antigravity
-    runtime: antigravity
-    description: QA agent producing acceptance tests and test cases.
+  - id: qa_gemini
+    runtime: gemini
+    description: QA agent producing acceptance tests and test cases through Gemini CLI.
     command:
-      - antigravity
-      - chat
-      - --mode
-      - agent
+      - gemini
   - id: coder_open_code
     runtime: open-code
     description: Implementation agent running in Open Code with a local model.
@@ -42,7 +39,7 @@ subscriptions:
       - path: docs/plan.md
         role: input
         description: Approved delivery plan.
-  - agentId: qa_antigravity
+  - agentId: qa_gemini
     topic: plan_done
     description: Produce test cases from the approved plan.
     requiredArtifacts:

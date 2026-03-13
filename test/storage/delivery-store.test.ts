@@ -64,7 +64,7 @@ test("delivery store persists ready deliveries for subscribed agents", async () 
       const deliveries = deliveryStore.planDeliveries({
         eventId: persistedEvent.eventId,
         topic: persistedEvent.topic,
-        agentIds: ["coder_open_code", "qa_antigravity"],
+        agentIds: ["coder_open_code", "qa_gemini"],
         status: "ready",
         availableAt: persistedEvent.createdAt
       });
@@ -72,7 +72,7 @@ test("delivery store persists ready deliveries for subscribed agents", async () 
       assert.equal(deliveries.length, 2);
       assert.deepEqual(
         deliveries.map((delivery) => delivery.agentId),
-        ["coder_open_code", "qa_antigravity"]
+        ["coder_open_code", "qa_gemini"]
       );
       assert.deepEqual(
         deliveryStore.listReadyDeliveries(persistedEvent.createdAt).map((delivery) => delivery.deliveryId),
@@ -122,7 +122,7 @@ test("approval store records decisions and delivery transitions preserve lifecyc
       deliveryStore.planDeliveries({
         eventId: persistedEvent.eventId,
         topic: persistedEvent.topic,
-        agentIds: ["tech_lead_claude", "qa_antigravity"],
+        agentIds: ["tech_lead_claude", "qa_gemini"],
         status: "pending_approval",
         availableAt: persistedEvent.createdAt,
         maxAttempts: 5

@@ -12,8 +12,8 @@ agents:
       - node
       - test/fixtures/agents/demo-agent.mjs
   - id: qa_demo
-    runtime: antigravity
-    description: Deterministic demo agent that fails once before producing test cases.
+    runtime: gemini
+    description: Deterministic demo agent that fails once before producing test cases through Gemini CLI.
     command:
       - node
       - test/fixtures/agents/demo-agent.mjs
