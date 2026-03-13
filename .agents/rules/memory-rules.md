@@ -2,50 +2,24 @@
 trigger: always_on
 ---
 
-# Memory Usage Rules for AI Agents
+# AI Agent Memory Rules
 
-## 1. Prefer Neural Memory
+Use this file as the default memory policy for AI agents working on this project.
 
-When an AI Agent needs to **query or store memory**, always prioritize **Neural Memory**.
+## Required Brain
 
-Repository:  
-https://github.com/nhadaututtheky/neural-memory
+- Always use brain `agent-bus`.
+- Replace `agent-bus` with the exact brain name assigned to this project.
+- Do not switch to another brain unless the user explicitly instructs you to do so.
 
-Neural Memory is the **default memory system** for all agents. Always use with project name for seperate context between projects
 
----
+## Tool Priority
 
-## 2. Use MCP Server Tools First
+- Prefer the Neural Memory MCP server for memory operations.
+- Use the `nmem` CLI only as a fallback when the Neural Memory MCP server is unavailable, failing, or returning an error that blocks the task.
+- When falling back to `nmem` CLI, keep the same brain and tag conventions defined in this file.
 
-Agents should **always use the MCP server tools from `neural-memory`** when interacting with memory.
+## Operational Rules
 
-This includes:
-- querying memory
-- storing memory
-- semantic search
-- updating memory
-
----
-
-## 3. Fallback to CLI if MCP Tools Fail
-
-If MCP tools cannot be used (e.g., **Codex sometimes fails to return stdout when calling neural-memory tools**), agents may fallback to the **`nmem` CLI**.
-
-Use CLI:
-`nmem`
-
----
-
-## 4. Priority Order
-
-Agents must follow this priority:
-
-1. MCP tools from `neural-memory`
-2. `nmem` CLI (fallback only)
-
-Do not skip step (1) unless it fails.
-
----
-
-## 5. Use with project name
-Always use neural-memory with project name for seperate context between projects
+- Every memory write must use brain `agent-bus`.
+- On fallback to CLI, use the same memory routing rules instead of inventing a separate convention.
