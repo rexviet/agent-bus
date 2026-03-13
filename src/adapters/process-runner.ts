@@ -31,9 +31,23 @@ export interface MaterializedAdapterRun {
   readonly resultFilePath: string;
 }
 
+export interface ProcessMonitorCallbacks {
+  readonly onStdout?: (chunk: Buffer) => void;
+  readonly onStderr?: (chunk: Buffer) => void;
+  readonly onStart?: (info: { pid: number; command: string; startedAt: Date }) => void;
+  readonly onComplete?: (info: {
+    pid: number;
+    exitCode: number | null;
+    signal: NodeJS.Signals | null;
+    elapsedMs: number;
+  }) => void;
+  readonly timeoutMs?: number;
+}
+
 export interface RunPreparedAdapterCommandInput {
   readonly materializedRun: MaterializedAdapterRun;
   readonly execution: PreparedAdapterCommand;
+  readonly monitor?: ProcessMonitorCallbacks;
 }
 
 export interface AdapterProcessRunResult {
@@ -84,8 +98,40 @@ export async function runPreparedAdapterCommand(
       stdio: ["ignore", "pipe", "pipe"]
     });
 
-    child.stdout?.pipe(logStream, { end: false });
-    child.stderr?.pipe(logStream, { end: false });
+    const monitor = input.monitor;
+
+    if (monitor) {
+      // When monitor is provided, use manual data listeners so we can
+      // deliver chunks to the callbacks as well as write to logStream.
+      child.stdout?.on("data", (chunk: Buffer) => {
+        logStream.write(chunk);
+        monitor.onStdout?.(chunk);
+      });
+      child.stderr?.on("data", (chunk: Buffer) => {
+        logStream.write(chunk);
+        monitor.onStderr?.(chunk);
+      });
+    } else {
+      // Default (backwards-compatible) path: pipe directly to logStream.
+      child.stdout?.pipe(logStream, { end: false });
+      child.stderr?.pipe(logStream, { end: false });
+    }
+
+    const pid = child.pid ?? 0;
+    const commandString = [input.execution.command, ...input.execution.args].join(" ");
+    const startedAt = new Date();
+
+    if (monitor?.onStart && child.pid !== undefined) {
+      monitor.onStart({ pid, command: commandString, startedAt });
+    }
+
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+    if (monitor?.timeoutMs !== undefined) {
+      timeoutHandle = setTimeout(() => {
+        child.kill("SIGTERM");
+      }, monitor.timeoutMs);
+    }
 
     const exit = await new Promise<{
       readonly exitCode: number | null;
@@ -96,6 +142,19 @@ export async function runPreparedAdapterCommand(
         resolve({ exitCode, signal });
       });
     });
+
+    if (timeoutHandle !== undefined) {
+      clearTimeout(timeoutHandle);
+    }
+
+    if (monitor?.onComplete && child.pid !== undefined) {
+      monitor.onComplete({
+        pid,
+        exitCode: exit.exitCode,
+        signal: exit.signal,
+        elapsedMs: Date.now() - startedAt.getTime()
+      });
+    }
 
     logStream.end();
     await once(logStream, "close");
