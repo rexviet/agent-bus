@@ -4,6 +4,7 @@ import type {
   OperatorRunSummary,
   PendingApprovalView
 } from "../daemon/operator-service.js";
+import type { AdapterWorkerExecutionResult } from "../daemon/adapter-worker.js";
 
 export interface WritableTextStream {
   write(chunk: string): boolean;
@@ -246,4 +247,79 @@ export function writePublishedEventText(
   writeLine(stream, `runId: ${event.runId}`);
   writeLine(stream, `topic: ${event.topic}`);
   writeLine(stream, `approvalStatus: ${event.approvalStatus}`);
+}
+
+export function writeWorkerStartedText(
+  stream: WritableTextStream,
+  options: {
+    readonly workerId: string;
+    readonly configPath: string;
+    readonly pollIntervalMs: number;
+    readonly leaseDurationMs: number;
+    readonly retryDelayMs?: number;
+    readonly once: boolean;
+  }
+): void {
+  writeLine(stream, `Worker started ${options.workerId}`);
+  writeLine(stream, `configPath: ${options.configPath}`);
+  writeLine(stream, `mode: ${options.once ? "once" : "loop"}`);
+  writeLine(stream, `pollIntervalMs: ${options.pollIntervalMs}`);
+  writeLine(stream, `leaseDurationMs: ${options.leaseDurationMs}`);
+
+  if (options.retryDelayMs !== undefined) {
+    writeLine(stream, `retryDelayMs: ${options.retryDelayMs}`);
+  }
+}
+
+export function writeWorkerExecutionText(
+  stream: WritableTextStream,
+  workerId: string,
+  result: AdapterWorkerExecutionResult
+): void {
+  writeLine(stream);
+  writeLine(stream, `Worker result ${workerId}`);
+  writeLine(stream, `deliveryId: ${result.delivery.deliveryId}`);
+  writeLine(stream, `eventId: ${result.delivery.eventId}`);
+  writeLine(stream, `agentId: ${result.delivery.agentId}`);
+  writeLine(stream, `status: ${result.status}`);
+  writeLine(stream, `deliveryStatus: ${result.delivery.status}`);
+  writeLine(
+    stream,
+    `attempts: ${result.delivery.attemptCount}/${result.delivery.maxAttempts}`
+  );
+  writeLine(stream, `replayCount: ${result.delivery.replayCount}`);
+  writeLine(stream, `emittedEvents: ${result.emittedEvents.length}`);
+
+  if (result.delivery.lastError) {
+    writeLine(stream, `lastError: ${result.delivery.lastError}`);
+  }
+
+  writeLine(stream, `workPackagePath: ${result.workPackagePath}`);
+  writeLine(stream, `resultFilePath: ${result.resultFilePath}`);
+  writeLine(stream, `logFilePath: ${result.logFilePath}`);
+}
+
+export function writeWorkerIdleText(
+  stream: WritableTextStream,
+  workerId: string
+): void {
+  writeLine(stream);
+  writeLine(stream, `Worker idle ${workerId}`);
+  writeLine(stream, "No deliveries ready.");
+}
+
+export function writeWorkerStoppedText(
+  stream: WritableTextStream,
+  summary: {
+    readonly workerId: string;
+    readonly processedDeliveries: number;
+    readonly idlePolls: number;
+    readonly reason: string;
+  }
+): void {
+  writeLine(stream);
+  writeLine(stream, `Worker stopped ${summary.workerId}`);
+  writeLine(stream, `reason: ${summary.reason}`);
+  writeLine(stream, `processedDeliveries: ${summary.processedDeliveries}`);
+  writeLine(stream, `idlePolls: ${summary.idlePolls}`);
 }

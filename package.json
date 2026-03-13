@@ -2,6 +2,9 @@
   "name": "agent-bus",
   "version": "0.1.0",
   "private": true,
+  "bin": {
+    "agent-bus": "./bin/agent-bus"
+  },
   "type": "module",
   "description": "Local-first event-driven orchestration runtime for AI agents.",
   "engines": {
@@ -12,7 +15,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "npm run build && node --experimental-sqlite --test dist/test/**/*.test.js",
     "start": "node --experimental-sqlite dist/cli.js",
-    "daemon": "node --experimental-sqlite dist/cli.js daemon"
+    "daemon": "node --experimental-sqlite dist/cli.js daemon",
+    "link:global": "npm run build && npm link",
+    "unlink:global": "npm unlink -g agent-bus"
   },
   "dependencies": {
     "yaml": "^2.8.2",
