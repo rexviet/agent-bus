@@ -16,8 +16,10 @@ import {
 import { createApprovalService } from "./approval-service.js";
 import {
   createAdapterWorker,
-  type AdapterWorkerExecutionResult
+  type AdapterWorkerExecutionResult,
+  type AdapterWorkerOptions
 } from "./adapter-worker.js";
+import type { ProcessMonitorCallbacks } from "../adapters/process-runner.js";
 import { createDeliveryService } from "./delivery-service.js";
 import { createDispatcher, type Dispatcher } from "./dispatcher.js";
 import { createOperatorService } from "./operator-service.js";
@@ -39,6 +41,7 @@ export interface StartDaemonOptions {
   readonly runRecoveryScanOnStart?: boolean;
   readonly registerSignalHandlers?: boolean;
   readonly databasePath?: string;
+  readonly monitor?: ProcessMonitorCallbacks;
 }
 
 export interface AgentBusDaemon {
@@ -163,7 +166,7 @@ export async function startDaemon(
     runStore,
     dispatcher
   });
-  const adapterWorker = createAdapterWorker({
+  const adapterWorkerOptions: AdapterWorkerOptions = {
     database,
     manifest,
     layout,
@@ -171,8 +174,10 @@ export async function startDaemon(
     eventStore,
     deliveryStore,
     deliveryService,
-    dispatcher
-  });
+    dispatcher,
+    ...(options.monitor ? { monitor: options.monitor } : {})
+  };
+  const adapterWorker = createAdapterWorker(adapterWorkerOptions);
   const replayService = createReplayService({
     eventStore,
     deliveryStore,

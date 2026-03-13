@@ -1,9 +1,13 @@
 import * as path from "node:path";
 
+import type { ProcessMonitorCallbacks } from "../adapters/process-runner.js";
 import { startDaemon } from "../daemon/index.js";
 import type { AdapterWorkerExecutionResult } from "../daemon/adapter-worker.js";
 import type { WritableTextStream } from "./output.js";
 import {
+  writeAgentCompletedText,
+  writeAgentOutputLine,
+  writeAgentStartedText,
   writeWorkerExecutionText,
   writeWorkerIdleText,
   writeWorkerStartedText,
@@ -17,7 +21,7 @@ export interface WorkerCommandIO {
 }
 
 const WORKER_HELP_TEXT = `Worker command:
-  agent-bus worker [--config path] [--worker-id id] [--lease-duration-ms N] [--poll-interval-ms N] [--retry-delay-ms N] [--once]
+  agent-bus worker [--config path] [--worker-id id] [--lease-duration-ms N] [--poll-interval-ms N] [--retry-delay-ms N] [--once] [--verbose]
 `;
 
 function hasFlag(args: readonly string[], flag: string): boolean {
@@ -120,7 +124,7 @@ export async function runWorkerCommand(
     "--poll-interval-ms",
     "--retry-delay-ms"
   ]);
-  const flagsWithoutValues = new Set(["--once"]);
+  const flagsWithoutValues = new Set(["--once", "--verbose"]);
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -160,6 +164,7 @@ export async function runWorkerCommand(
   const configPath = readOptionValue(args, "--config") ?? "agent-bus.yaml";
   const workerId = readOptionValue(args, "--worker-id") ?? `worker-${process.pid}`;
   const once = hasFlag(args, "--once");
+  const verbose = hasFlag(args, "--verbose");
   let leaseDurationMs: number;
   let pollIntervalMs: number;
   let retryDelayMs: number | undefined;
@@ -188,10 +193,54 @@ export async function runWorkerCommand(
     return 1;
   }
 
+  // When --verbose is set, build monitor callbacks that stream agent output to terminal.
+  // Uses a static label "agent" since the agentId is per-delivery and known only at runtime.
+  let monitor: ProcessMonitorCallbacks | undefined;
+
+  if (verbose) {
+    // Line buffer to avoid splitting multi-byte or mid-line chunks.
+    const makeLineBuffer = (source: "stdout" | "stderr") => {
+      let buffer = "";
+
+      return (chunk: Buffer): void => {
+        buffer += chunk.toString();
+        const lines = buffer.split("\n");
+        // All but last element are complete lines.
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          writeAgentOutputLine(io.stdout, "agent", source, line);
+        }
+      };
+    };
+
+    monitor = {
+      onStdout: makeLineBuffer("stdout"),
+      onStderr: makeLineBuffer("stderr"),
+      onStart: (info) => {
+        writeAgentStartedText(io.stdout, {
+          agentId: "agent",
+          pid: info.pid,
+          command: info.command
+        });
+      },
+      onComplete: (info) => {
+        writeAgentCompletedText(io.stdout, {
+          agentId: "agent",
+          pid: info.pid,
+          exitCode: info.exitCode,
+          signal: info.signal,
+          elapsedMs: info.elapsedMs
+        });
+      }
+    };
+  }
+
   const daemon = await startDaemon({
     configPath: path.resolve(io.cwd, configPath),
     repositoryRoot: io.cwd,
-    registerSignalHandlers: false
+    registerSignalHandlers: false,
+    ...(monitor ? { monitor } : {})
   });
   const stopController = createStopController();
   const unregisterSignals = registerWorkerSignalHandlers(stopController);

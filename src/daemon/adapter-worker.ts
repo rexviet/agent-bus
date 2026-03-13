@@ -10,7 +10,8 @@ import {
 import { buildAdapterCommand } from "../adapters/registry.js";
 import {
   materializeAdapterRun,
-  runPreparedAdapterCommand
+  runPreparedAdapterCommand,
+  type ProcessMonitorCallbacks
 } from "../adapters/process-runner.js";
 import type { AgentBusManifest } from "../config/manifest-schema.js";
 import type { RuntimeLayout } from "../shared/runtime-layout.js";
@@ -82,6 +83,7 @@ export interface AdapterWorkerOptions {
   readonly deliveryService: DeliveryServiceShape;
   readonly dispatcher: Dispatcher;
   readonly defaultRetryDelayMs?: number;
+  readonly monitor?: ProcessMonitorCallbacks;
 }
 
 function sanitizePathSegment(value: string): string {
@@ -395,7 +397,8 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
             workPackagePath: materializedRun.workPackagePath,
             resultFilePath: materializedRun.resultFilePath,
             logFilePath: materializedRun.logFilePath
-          })
+          }),
+          ...(options.monitor ? { monitor: options.monitor } : {})
         });
 
         if (!processResult.result) {

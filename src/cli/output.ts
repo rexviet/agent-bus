@@ -323,3 +323,42 @@ export function writeWorkerStoppedText(
   writeLine(stream, `processedDeliveries: ${summary.processedDeliveries}`);
   writeLine(stream, `idlePolls: ${summary.idlePolls}`);
 }
+
+export function writeAgentOutputLine(
+  stream: WritableTextStream,
+  agentId: string,
+  source: "stdout" | "stderr",
+  line: string
+): void {
+  // Indent under worker status so nested output is visually distinct.
+  stream.write(`  [${agentId}:${source}] ${line}\n`);
+}
+
+export function writeAgentStartedText(
+  stream: WritableTextStream,
+  info: {
+    readonly agentId: string;
+    readonly pid: number;
+    readonly command: string;
+  }
+): void {
+  writeLine(stream, `Agent started ${info.agentId} (pid=${info.pid}, command=${info.command})`);
+}
+
+export function writeAgentCompletedText(
+  stream: WritableTextStream,
+  info: {
+    readonly agentId: string;
+    readonly pid: number;
+    readonly exitCode: number | null;
+    readonly signal: NodeJS.Signals | null;
+    readonly elapsedMs: number;
+  }
+): void {
+  const elapsed = (info.elapsedMs / 1000).toFixed(1);
+  const exitInfo = info.signal ? `signal=${info.signal}` : `exitCode=${info.exitCode}`;
+  writeLine(
+    stream,
+    `Agent completed ${info.agentId} (pid=${info.pid}, ${exitInfo}, elapsed=${elapsed}s)`
+  );
+}
