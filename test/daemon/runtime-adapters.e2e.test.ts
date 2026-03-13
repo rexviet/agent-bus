@@ -28,7 +28,7 @@ async function withTempRepo(
   }
 }
 
-test("runtime adapters hand off artifacts across codex, open-code, and antigravity identities", async () => {
+test("runtime adapters hand off artifacts across codex, open-code, and gemini identities", async () => {
   await withTempRepo(
     `version: 1
 workspace:
@@ -43,8 +43,8 @@ agents:
   - id: coder_open_code
     runtime: open-code
     command: ["${process.execPath}", "${successAdapterPath}"]
-  - id: qa_antigravity
-    runtime: antigravity
+  - id: qa_gemini
+    runtime: gemini
     command: ["${process.execPath}", "${successAdapterPath}"]
 
 subscriptions:
@@ -52,7 +52,7 @@ subscriptions:
     topic: draft_ready
   - agentId: coder_open_code
     topic: plan_done
-  - agentId: qa_antigravity
+  - agentId: qa_gemini
     topic: implementation_done
 
 approvalGates: []
@@ -100,17 +100,17 @@ artifactConventions: []
 
         const codexExecution = await daemon.runWorkerIteration("worker-codex", 60_000);
         const openCodeExecution = await daemon.runWorkerIteration("worker-open-code", 60_000);
-        const antigravityExecution = await daemon.runWorkerIteration("worker-antigravity", 60_000);
+        const geminiExecution = await daemon.runWorkerIteration("worker-gemini", 60_000);
 
         assert.ok(codexExecution);
         assert.ok(openCodeExecution);
-        assert.ok(antigravityExecution);
+        assert.ok(geminiExecution);
         assert.equal(codexExecution?.delivery.agentId, "ba_codex");
         assert.equal(openCodeExecution?.delivery.agentId, "coder_open_code");
-        assert.equal(antigravityExecution?.delivery.agentId, "qa_antigravity");
+        assert.equal(geminiExecution?.delivery.agentId, "qa_gemini");
         assert.equal(codexExecution?.status, "success");
         assert.equal(openCodeExecution?.status, "success");
-        assert.equal(antigravityExecution?.status, "success");
+        assert.equal(geminiExecution?.status, "success");
       } finally {
         await daemon.stop();
       }
@@ -118,7 +118,7 @@ artifactConventions: []
   );
 });
 
-for (const executable of ["codex", "opencode", "antigravity"] as const) {
+for (const executable of ["codex", "opencode", "gemini"] as const) {
   test(`runtime smoke check skips cleanly or prints help for ${executable}`, () => {
     const available = spawnSync("sh", ["-lc", `command -v ${executable}`], {
       encoding: "utf8"

@@ -34,14 +34,14 @@ agents:
   - id: tech_lead_claude
     runtime: claude-code
     command: [claude, run]
-  - id: qa_antigravity
-    runtime: antigravity
-    command: [antigravity, run]
+  - id: qa_gemini
+    runtime: gemini
+    command: [gemini]
 
 subscriptions:
   - agentId: tech_lead_claude
     topic: implementation_ready
-  - agentId: qa_antigravity
+  - agentId: qa_gemini
     topic: implementation_ready
 
 approvalGates: []
@@ -83,7 +83,7 @@ artifactConventions: []
         assert.deepEqual(
           deliveries.map((delivery) => [delivery.agentId, delivery.status]),
           [
-            ["qa_antigravity", "ready"],
+            ["qa_gemini", "ready"],
             ["tech_lead_claude", "ready"]
           ]
         );
@@ -113,14 +113,14 @@ agents:
   - id: tech_lead_claude
     runtime: claude-code
     command: [claude, run]
-  - id: qa_antigravity
-    runtime: antigravity
-    command: [antigravity, run]
+  - id: qa_gemini
+    runtime: gemini
+    command: [gemini]
 
 subscriptions:
   - agentId: tech_lead_claude
     topic: plan_done
-  - agentId: qa_antigravity
+  - agentId: qa_gemini
     topic: plan_done
 
 approvalGates:

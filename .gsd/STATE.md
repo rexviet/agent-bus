@@ -2,7 +2,7 @@
 
 > **Current Phase**: Milestone Planning
 > **Current Focus**: Drafting `v1.1` to extract backend abstraction boundaries while keeping the SQLite local-first runtime as the stable default
-> **Last Updated**: 2026-03-10
+> **Last Updated**: 2026-03-13
 
 ## Current Position
 - **Milestone**: v1.1
@@ -13,16 +13,17 @@
 ## Active Work
 - `v1.0` remains complete and is the baseline behavior to preserve.
 - `v1.1` is drafted as an architecture milestone for backend abstraction, not a distributed-backend implementation milestone.
-- The current branch `feature/pause-session-handoff` still only carries docs and handoff updates; implementation for `v1.1` should begin on a fresh working branch.
+- The current branch `feature/gemini-runtime-adapter` replaces the unstable Antigravity runtime path with Gemini CLI while keeping the local SQLite workflow and operator demo intact.
 
 ## Last Session Summary
 The repository finished `v1.0` with operator workflow and README work already merged on `main`. This session starts the next milestone definition, focused on separating workflow semantics from storage and dispatch implementation details so future backends can be added without destabilizing the current SQLite runtime.
 
 ## In-Progress Work
 No `v1.1` implementation has started yet.
-- Branch: `feature/pause-session-handoff`
+- Branch: `feature/gemini-runtime-adapter`
 - Milestone status: drafted only
-- Tests status: unchanged from the latest known `v1.0` verification: `npm test` with `61/61` passing tests plus manifest validation for `agent-bus.example.yaml`, `agent-bus.yaml`, and `examples/operator-demo/agent-bus.demo.yaml`
+- Runtime status: built-in QA runtime support now targets Gemini CLI instead of Antigravity for local v1 testing stability
+- Tests status: current verification is `npm test` with `66/66` passing tests plus manifest validation for `agent-bus.example.yaml`, `agent-bus.yaml`, and `examples/operator-demo/agent-bus.demo.yaml`
 - Local workspace note: additional docs-only demo prompt files exist under `examples/operator-demo/agents-demo/`
 
 ## Blockers

@@ -44,8 +44,8 @@ agents:
   - id: coder_open_code
     runtime: open-code
     command: ["${process.execPath}", "${successAdapterPath}"]
-  - id: qa_antigravity
-    runtime: antigravity
+  - id: qa_gemini
+    runtime: gemini
     command: ["${process.execPath}", "${successAdapterPath}"]
 
 subscriptions:
@@ -54,7 +54,7 @@ subscriptions:
     requiredArtifacts:
       - path: docs/plan.md
         role: input
-  - agentId: qa_antigravity
+  - agentId: qa_gemini
     topic: implementation_done
 
 approvalGates: []
@@ -103,7 +103,7 @@ artifactConventions: []
           daemon.listDeliveriesForEvent(
             execution?.emittedEvents[0]?.eventId as string
           )[0]?.agentId,
-          "qa_antigravity"
+          "qa_gemini"
         );
 
         const workPackage = JSON.parse(
@@ -196,12 +196,12 @@ workspace:
   logsDir: .agent-bus/logs
 
 agents:
-  - id: qa_antigravity
-    runtime: antigravity
+  - id: qa_gemini
+    runtime: gemini
     command: ["${process.execPath}", "${failAdapterPath}"]
 
 subscriptions:
-  - agentId: qa_antigravity
+  - agentId: qa_gemini
     topic: qa_ready
 
 approvalGates: []
@@ -261,14 +261,14 @@ agents:
   - id: coder_open_code
     runtime: open-code
     command: ["${process.execPath}", "${successAdapterPath}"]
-  - id: qa_antigravity
-    runtime: antigravity
+  - id: qa_gemini
+    runtime: gemini
     command: ["${process.execPath}", "${successAdapterPath}"]
 
 subscriptions:
   - agentId: coder_open_code
     topic: implementation_ready
-  - agentId: qa_antigravity
+  - agentId: qa_gemini
     topic: implementation_done
 
 approvalGates: []

@@ -1,8 +1,8 @@
-# QA Demo
+# QA Gemini Demo
 
 ## Role
 
-You are the QA agent. After the `plan_done` event is approved, you consume the plan artifact and produce test cases.
+You are the QA agent running through Gemini CLI. After the `plan_done` event is approved, you consume the plan artifact and produce test cases.
 
 The deterministic demo intentionally makes your first attempt fail with a retryable error so the replay workflow can be demonstrated.
 

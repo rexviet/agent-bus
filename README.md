@@ -202,8 +202,10 @@ This project is currently installed from source.
 - optional agent runtimes depending on your manifest:
   - `codex`
   - `opencode` or `open-code`
-  - `antigravity`
+  - `gemini`
   - any other executable if you use the generic manifest-command fallback
+
+If you use the built-in Gemini adapter, install the `gemini` CLI separately and make sure it is already authenticated before running workers.
 
 ### Install From Source
 
@@ -306,7 +308,9 @@ Each agent declares:
 - optional `workingDirectory`
 - optional `environment`
 
-Special handling exists for `codex`, `open-code`, and `antigravity`.
+Special handling exists for `codex`, `open-code`, and `gemini`.
+
+The Gemini adapter runs in headless prompt mode through `gemini -p` and defaults to `--approval-mode auto_edit` unless you override that in the manifest command arguments.
 
 If `runtime` is unknown or the executable does not match a built-in runtime adapter, Agent Bus falls back to the manifest command as-is. That is how you can integrate custom wrappers or other CLIs.
 

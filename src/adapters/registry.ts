@@ -2,14 +2,14 @@ import { z } from "zod";
 
 import type { AgentBusManifest } from "../config/manifest-schema.js";
 import type { PreparedAdapterCommand } from "./process-runner.js";
-import { buildAntigravityCommand } from "./vendors/antigravity.js";
 import { buildCodexCommand } from "./vendors/codex.js";
+import { buildGeminiCommand } from "./vendors/gemini.js";
 import { buildOpenCodeCommand } from "./vendors/open-code.js";
 
 export const SupportedRuntimeFamilySchema = z.enum([
   "codex",
   "open-code",
-  "antigravity"
+  "gemini"
 ]);
 
 export type SupportedRuntimeFamily = z.infer<typeof SupportedRuntimeFamilySchema>;
@@ -42,11 +42,11 @@ const runtimeDefinitions = {
     executableCandidates: ["opencode", "open-code"],
     executionMode: "non_interactive_cli"
   },
-  antigravity: {
-    family: "antigravity",
-    displayName: "Antigravity",
-    executableCandidates: ["antigravity"],
-    executionMode: "editor_cli"
+  gemini: {
+    family: "gemini",
+    displayName: "Gemini CLI",
+    executableCandidates: ["gemini"],
+    executionMode: "non_interactive_cli"
   }
 } as const satisfies Record<SupportedRuntimeFamily, RuntimeDefinition>;
 
@@ -158,7 +158,7 @@ export function buildAdapterCommand(
       return buildCodexCommand(vendorInput);
     case "open-code":
       return buildOpenCodeCommand(vendorInput);
-    case "antigravity":
-      return buildAntigravityCommand(vendorInput);
+    case "gemini":
+      return buildGeminiCommand(vendorInput);
   }
 }

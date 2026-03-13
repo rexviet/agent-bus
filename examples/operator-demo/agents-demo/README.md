@@ -11,7 +11,7 @@ These briefs are useful when you want to run the demo as a human-driven or promp
 - `ba-codex.md`: publishes the seed `plan_done` event.
 - `human-approver.md`: reviews and approves or rejects the `plan_done` event.
 - `tech-lead-demo.md`: produces the system design artifact after approval.
-- `qa-demo.md`: produces test cases after approval and documents the replay step for the intentional demo failure.
+- `qa-gemini.md`: produces test cases after approval and documents the replay step for the intentional demo failure.
 
 ## Shared Paths
 
