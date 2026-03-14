@@ -7,3 +7,5 @@ dist/
 .agent-bus/demo-logs/*
 !.agent-bus/state/.gitkeep
 !.agent-bus/logs/.gitkeep
+
+examples/my-test-project/
