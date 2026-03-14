@@ -20,7 +20,7 @@ const grandchildDelayMs = Number(process.env.FIXTURE_GRANDCHILD_DELAY_MS ?? 6000
 // Spawn a grandchild that ignores SIGTERM and sleeps for the specified duration
 const grandchild = spawn(process.execPath, [
   "-e",
-  `setTimeout(() => {}, ${grandchildDelayMs})`
+  `process.on("SIGTERM", () => {}); setTimeout(() => {}, ${grandchildDelayMs})`
 ]);
 
 // Install a SIGTERM handler that does nothing — absorb the signal

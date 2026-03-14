@@ -19,6 +19,11 @@ const FIXTURE_PATH = path.resolve(
   "test/fixtures/adapters/monitor-fixture.mjs"
 );
 
+const GROUP_FIXTURE_PATH = path.resolve(
+  process.cwd(),
+  "test/fixtures/adapters/timeout-group-fixture.mjs"
+);
+
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "ab-monitor-"));
 
@@ -248,5 +253,125 @@ test("onComplete: called once with pid, exitCode, signal, elapsedMs when process
       typeof info.elapsedMs === "number" && info.elapsedMs >= 0,
       `elapsedMs should be a non-negative number, got: ${info.elapsedMs}`
     );
+  });
+});
+
+// -----------------------------------------------------------------------
+// Test 8: Process group kill — SIGTERM to group kills grandchild
+// -----------------------------------------------------------------------
+test("process group kill: SIGTERM to process group kills fixture with grandchild ignoring SIGTERM", async () => {
+  await withTempDir(async (dir) => {
+    const monitor: ProcessMonitorCallbacks = {
+      timeoutMs: 200 // timeout quickly to trigger SIGTERM
+    };
+
+    const materializedRun = makeRun(dir);
+    await writeFile(materializedRun.workPackagePath, "{}", "utf8");
+
+    const before = Date.now();
+    const result = await runPreparedAdapterCommand({
+      materializedRun,
+      execution: {
+        command: process.execPath,
+        args: [GROUP_FIXTURE_PATH],
+        workingDirectory: process.cwd(),
+        environment: { FIXTURE_GRANDCHILD_DELAY_MS: "60000" }
+      },
+      monitor
+    });
+    const elapsed = Date.now() - before;
+
+    // Process group kill should reach the grandchild even though it ignores SIGTERM.
+    // If SIGKILL escalation is working, the result signal should be "SIGKILL".
+    assert.equal(
+      result.signal,
+      "SIGKILL",
+      `Expected SIGKILL signal (process group kill with escalation), got signal=${result.signal} exitCode=${result.exitCode}`
+    );
+
+    // Total elapsed should be ~200ms (timeout) + ~5000ms (grace) + overhead
+    assert.ok(
+      elapsed < 6500,
+      `Process should be killed within ~6s (200ms timeout + 5000ms grace + overhead), took ${elapsed}ms`
+    );
+  });
+});
+
+// -----------------------------------------------------------------------
+// Test 9: SIGKILL escalation fires within grace period
+// -----------------------------------------------------------------------
+test("SIGKILL escalation: SIGKILL sent after grace period when process ignores SIGTERM", async () => {
+  await withTempDir(async (dir) => {
+    const monitor: ProcessMonitorCallbacks = {
+      timeoutMs: 300 // timeout quickly
+    };
+
+    const materializedRun = makeRun(dir);
+    await writeFile(materializedRun.workPackagePath, "{}", "utf8");
+
+    const before = Date.now();
+    const result = await runPreparedAdapterCommand({
+      materializedRun,
+      execution: {
+        command: process.execPath,
+        args: [GROUP_FIXTURE_PATH],
+        workingDirectory: process.cwd(),
+        environment: { FIXTURE_GRANDCHILD_DELAY_MS: "60000" }
+      },
+      monitor
+    });
+    const elapsed = Date.now() - before;
+
+    assert.equal(
+      result.signal,
+      "SIGKILL",
+      `Expected SIGKILL after grace period, got signal=${result.signal} exitCode=${result.exitCode}`
+    );
+
+    // Should complete within ~300ms + ~5000ms grace period
+    assert.ok(
+      elapsed < 6000,
+      `Total elapsed should be < 6s (300ms + 5000ms grace), took ${elapsed}ms`
+    );
+  });
+});
+
+// -----------------------------------------------------------------------
+// Test 10: Result file deleted after SIGKILL
+// -----------------------------------------------------------------------
+test("result file deletion: partial result file is deleted after SIGKILL", async () => {
+  await withTempDir(async (dir) => {
+    const monitor: ProcessMonitorCallbacks = {
+      timeoutMs: 200
+    };
+
+    const materializedRun = makeRun(dir);
+    await writeFile(materializedRun.workPackagePath, "{}", "utf8");
+
+    // Write a partial result file to simulate an in-progress write
+    await writeFile(materializedRun.resultFilePath, '{"status":"suc', "utf8");
+
+    await runPreparedAdapterCommand({
+      materializedRun,
+      execution: {
+        command: process.execPath,
+        args: [GROUP_FIXTURE_PATH],
+        workingDirectory: process.cwd(),
+        environment: { FIXTURE_GRANDCHILD_DELAY_MS: "60000" }
+      },
+      monitor
+    });
+
+    // After SIGKILL, the result file should be deleted
+    let fileExists = false;
+    try {
+      await readFile(materializedRun.resultFilePath, "utf8");
+      fileExists = true;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      assert.equal(code, "ENOENT", "Result file should be deleted (ENOENT) after SIGKILL");
+    }
+
+    assert.equal(fileExists, false, "Result file should not exist after SIGKILL");
   });
 });
