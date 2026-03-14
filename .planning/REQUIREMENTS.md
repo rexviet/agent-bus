@@ -70,26 +70,26 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TIMEOUT-01 | — | Pending |
-| TIMEOUT-02 | — | Pending |
-| TIMEOUT-03 | — | Pending |
-| TIMEOUT-04 | — | Pending |
-| LOG-01 | — | Pending |
-| LOG-02 | — | Pending |
-| LOG-03 | — | Pending |
-| WORKER-01 | — | Pending |
-| WORKER-02 | — | Pending |
-| WORKER-03 | — | Pending |
-| MCP-01 | — | Pending |
-| MCP-02 | — | Pending |
-| MCP-03 | — | Pending |
-| MCP-04 | — | Pending |
+| TIMEOUT-01 | Phase 5 | Pending |
+| TIMEOUT-02 | Phase 5 | Pending |
+| TIMEOUT-03 | Phase 5 | Pending |
+| TIMEOUT-04 | Phase 5 | Pending |
+| LOG-01 | Phase 6 | Pending |
+| LOG-02 | Phase 6 | Pending |
+| LOG-03 | Phase 6 | Pending |
+| WORKER-01 | Phase 7 | Pending |
+| WORKER-02 | Phase 7 | Pending |
+| WORKER-03 | Phase 7 | Pending |
+| MCP-01 | Phase 8 | Pending |
+| MCP-02 | Phase 8 | Pending |
+| MCP-03 | Phase 8 | Pending |
+| MCP-04 | Phase 8 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 14 total
-- Mapped to phases: 0
-- Unmapped: 14 ⚠️
+- Mapped to phases: 14
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-03-14*
-*Last updated: 2026-03-14 after initial definition*
+*Last updated: 2026-03-14 after roadmap creation (v1.1 phases 5-8)*
