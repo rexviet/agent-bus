@@ -35,8 +35,8 @@ Phases 1-4 delivered the core event-driven orchestration runtime: manifest-drive
 
 Plans:
 - [x] 05-01-PLAN.md — Add `timeout` field to AgentSchema (manifest schema + tests) ✓ COMPLETE
-- [ ] 05-02-PLAN.md — Process group kill + SIGKILL escalation in process-runner.ts (fixture + tests)
-- [ ] 05-03-PLAN.md — Per-delivery monitor wiring + timeout-retry integration test in adapter-worker.ts
+- [x] 05-02-PLAN.md — Process group kill + SIGKILL escalation in process-runner.ts (fixture + tests) ✓ COMPLETE
+- [x] 05-03-PLAN.md — Per-delivery monitor wiring + timeout-retry integration test in adapter-worker.ts ✓ COMPLETE
 
 ### Phase 6: Structured Logging
 **Goal**: Operators can filter and correlate daemon log output by delivery or agent without additional tooling
@@ -75,7 +75,7 @@ Plans:
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 5. Foundation Safety | v1.1 | 1/3 | In progress | 2026-03-14 |
+| 5. Foundation Safety | v1.1 | 3/3 | ✅ COMPLETE | 2026-03-14 |
 | 6. Structured Logging | v1.1 | 0/? | Not started | - |
 | 7. Concurrent Workers | v1.1 | 0/? | Not started | - |
 | 8. Embedded MCP Server | v1.1 | 0/? | Not started | - |

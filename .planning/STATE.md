@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Production Hardening
 status: in_progress
-stopped_at: Plan 05-02 complete
-last_updated: "2026-03-14T14:23:00.000Z"
-last_activity: 2026-03-14 — Plan 05-02 complete (process group kill + SIGKILL escalation)
+stopped_at: Plan 05-03 complete
+last_updated: "2026-03-14T10:00:15Z"
+last_activity: 2026-03-14 — Plan 05-03 complete (per-delivery timeout wiring from manifest)
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 12
-  completed_plans: 2
-  percent: 17
+  completed_plans: 3
+  percent: 25
 ---
 
 # Project State
@@ -26,24 +26,24 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Phase: 5 of 8 in v1.1 (Foundation Safety)
-Plan: 2 of 3 (05-02 complete) — Process group kill + SIGKILL escalation
+Plan: 3 of 3 (05-03 complete) — Per-delivery timeout wiring from manifest
 Status: In progress
-Last activity: 2026-03-14 — Plan 05-02 complete (SIGTERM→SIGKILL escalation implemented)
+Last activity: 2026-03-14 — Plan 05-03 complete (per-delivery monitor from agent.timeout)
 
-Progress: [██░░░░░░░░] 17% (v1.1) — 2 of 12 plans complete
+Progress: [███░░░░░░░] 25% (v1.1) — 3 of 12 plans complete
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2 (v1.1)
-- Average duration: 23 min
-- Total execution time: 46 min
+- Total plans completed: 3 (v1.1)
+- Average duration: 18 min (52 total / 3 plans)
+- Total execution time: 52 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 5 (Foundation Safety) | 2/3 | 46 min | 23 min |
+| 5 (Foundation Safety) | 3/3 | 52 min | 17 min |
 
 *Updated after each plan completion*
 
@@ -53,6 +53,8 @@ Progress: [██░░░░░░░░] 17% (v1.1) — 2 of 12 plans complete
 
 Recent decisions affecting v1.1 work:
 
+- [Plan 05-03]: Per-delivery monitor constructed inside runIteration; preserves global callbacks; agent.timeout converted to ms
+- [Plan 05-03]: Timeout signal exits routed through deliveryService.fail() (existing retry mechanism); no special dead-letter logic needed
 - [Plan 05-02]: SIGKILL grace period fixed at 5000ms (SIGKILL_GRACE_MS constant, non-configurable in v1.1)
 - [Plan 05-02]: Process spawning uses `detached: true` without `unref()` for process group management
 - [Plan 05-02]: Result file unconditionally deleted after SIGKILL via `rm(resultFilePath, { force: true })`
@@ -75,6 +77,6 @@ Recent decisions affecting v1.1 work:
 
 ## Session Continuity
 
-Last session: 2026-03-14T14:23:00.000Z
-Stopped at: Plan 05-02 complete, ready for Plan 05-03 (wiring timeout from manifest to daemon)
-Resume file: .planning/phases/05-foundation-safety/05-03-PLAN.md
+Last session: 2026-03-14T10:00:15Z
+Stopped at: Plan 05-03 complete (Foundation Safety phase complete, all TIMEOUT requirements met)
+Next: Phase 6 (Logging harness — daemon structured logging with pino, CLI integration)

@@ -10,9 +10,9 @@ Requirements for Production Hardening milestone. Each maps to roadmap phases.
 ### Timeout
 
 - [x] **TIMEOUT-01**: Operator can configure per-agent process timeout via `timeout` field in agent manifest ✓ COMPLETE (Plan 05-01)
-- [ ] **TIMEOUT-02**: Daemon sends SIGTERM to the agent process group (not just direct child) when timeout expires
-- [ ] **TIMEOUT-03**: Daemon escalates to SIGKILL if agent process group does not exit within a grace period after SIGTERM
-- [ ] **TIMEOUT-04**: Timed-out delivery is scheduled for retry rather than immediately dead-lettered
+- [x] **TIMEOUT-02**: Daemon sends SIGTERM to the agent process group (not just direct child) when timeout expires ✓ COMPLETE (Plan 05-02)
+- [x] **TIMEOUT-03**: Daemon escalates to SIGKILL if agent process group does not exit within a grace period after SIGTERM ✓ COMPLETE (Plan 05-02)
+- [x] **TIMEOUT-04**: Timed-out delivery is scheduled for retry rather than immediately dead-lettered ✓ COMPLETE (Plan 05-03)
 
 ### Logging
 
@@ -71,9 +71,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | TIMEOUT-01 | Phase 5 | Complete (2026-03-14) |
-| TIMEOUT-02 | Phase 5 | Pending |
-| TIMEOUT-03 | Phase 5 | Pending |
-| TIMEOUT-04 | Phase 5 | Pending |
+| TIMEOUT-02 | Phase 5 | Complete (2026-03-14) |
+| TIMEOUT-03 | Phase 5 | Complete (2026-03-14) |
+| TIMEOUT-04 | Phase 5 | Complete (2026-03-14) |
 | LOG-01 | Phase 6 | Pending |
 | LOG-02 | Phase 6 | Pending |
 | LOG-03 | Phase 6 | Pending |
