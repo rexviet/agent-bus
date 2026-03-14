@@ -26,11 +26,22 @@ Enable asynchronous, event-driven coordination between multiple agent runtimes i
 - ✓ REQ-11: CLI for runs, approvals, failures, replay, publish — v1.0
 - ✓ REQ-12: Single-machine, single-repository operation model — v1.0
 
+## Current Milestone: v1.1 Production Hardening
+
+**Goal:** Harden the runtime for real-world use with process timeouts, structured logging, concurrent workers, env isolation, and an embedded MCP server for direct agent event publishing.
+
+**Target features:**
+- Process timeout for spawned agent processes
+- Structured logging (replacing raw text logs)
+- Concurrent workers (parallel delivery processing)
+- Env isolation for spawned processes
+- MCP Server embedded in daemon (publish_event, get_delivery, list_artifacts)
+
 ### Active
 
 <!-- Current scope — building toward these. -->
 
-(Defining next milestone)
+(See Current Milestone above — requirements being defined)
 
 ### Out of Scope
 
@@ -65,4 +76,4 @@ Enable asynchronous, event-driven coordination between multiple agent runtimes i
 | YAML manifest for workflow config | Declarative, version-controllable | ✓ Good |
 
 ---
-*Last updated: 2026-03-13 after v1.0 completion and milestone planning*
+*Last updated: 2026-03-14 after v1.1 milestone started*
