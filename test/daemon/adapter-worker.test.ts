@@ -16,6 +16,10 @@ const failAdapterPath = path.resolve(
   process.cwd(),
   "test/fixtures/adapters/fail-adapter.mjs"
 );
+const monitorFixturePath = path.resolve(
+  process.cwd(),
+  "test/fixtures/adapters/monitor-fixture.mjs"
+);
 
 async function withTempRepo(
   manifestText: string,
@@ -344,6 +348,127 @@ artifactConventions: []
         assert.equal(secondExecution?.delivery.status, "completed");
         assert.equal(secondExecution?.emittedEvents.length, 1);
         assert.equal(secondExecution?.emittedEvents[0]?.topic, "implementation_done");
+      } finally {
+        await daemon.stop();
+      }
+    }
+  );
+});
+
+test("runWorkerIteration schedules retry when agent times out", async () => {
+  await withTempRepo(
+    `version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+
+agents:
+  - id: slow_agent
+    runtime: codex
+    timeout: 1
+    command: ["${process.execPath}", "${monitorFixturePath}", "--"]
+    environment:
+      FIXTURE_DELAY_MS: "5000"
+
+subscriptions:
+  - agentId: slow_agent
+    topic: implementation_ready
+
+approvalGates: []
+artifactConventions: []
+`,
+    async (configPath, repositoryRoot) => {
+      const daemon = await startDaemon({
+        configPath,
+        repositoryRoot,
+        registerSignalHandlers: false,
+        recoveryIntervalMs: 5_000
+      });
+
+      try {
+        daemon.publish(
+          parseEventEnvelope({
+            eventId: "550e8400-e29b-41d4-a716-446655440304",
+            topic: "implementation_ready",
+            runId: "run-adapter-timeout-001",
+            correlationId: "run-adapter-timeout-001",
+            dedupeKey: "implementation_ready:run-adapter-timeout-001",
+            occurredAt: "2026-03-10T05:15:00Z",
+            producer: {
+              agentId: "planner_codex",
+              runtime: "codex"
+            },
+            payload: {},
+            payloadMetadata: {},
+            artifactRefs: []
+          })
+        );
+
+        const execution = await daemon.runWorkerIteration("worker-timeout", 60_000);
+
+        assert.ok(execution);
+        assert.equal(execution?.status, "process_error");
+        assert.equal(execution?.delivery.status, "retry_scheduled");
+      } finally {
+        await daemon.stop();
+      }
+    }
+  );
+});
+
+test("runWorkerIteration completes successfully when agent has no timeout configured", async () => {
+  await withTempRepo(
+    `version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+
+agents:
+  - id: quick_agent
+    runtime: codex
+    command: ["${process.execPath}", "${successAdapterPath}"]
+
+subscriptions:
+  - agentId: quick_agent
+    topic: implementation_ready
+
+approvalGates: []
+artifactConventions: []
+`,
+    async (configPath, repositoryRoot) => {
+      const daemon = await startDaemon({
+        configPath,
+        repositoryRoot,
+        registerSignalHandlers: false,
+        recoveryIntervalMs: 5_000
+      });
+
+      try {
+        daemon.publish(
+          parseEventEnvelope({
+            eventId: "550e8400-e29b-41d4-a716-446655440305",
+            topic: "implementation_ready",
+            runId: "run-adapter-no-timeout-001",
+            correlationId: "run-adapter-no-timeout-001",
+            dedupeKey: "implementation_ready:run-adapter-no-timeout-001",
+            occurredAt: "2026-03-10T05:20:00Z",
+            producer: {
+              agentId: "planner_codex",
+              runtime: "codex"
+            },
+            payload: {},
+            payloadMetadata: {},
+            artifactRefs: []
+          })
+        );
+
+        const execution = await daemon.runWorkerIteration("worker-no-timeout", 60_000);
+
+        assert.ok(execution);
+        assert.equal(execution?.status, "success");
+        assert.equal(execution?.delivery.status, "completed");
       } finally {
         await daemon.stop();
       }

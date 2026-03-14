@@ -357,6 +357,12 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
         }
 
         const agent = getManifestAgent(options.manifest, claimedDelivery.agentId);
+
+        const perDeliveryMonitor: ProcessMonitorCallbacks | undefined =
+          agent.timeout !== undefined
+            ? { ...(options.monitor ?? {}), timeoutMs: agent.timeout * 1000 }
+            : options.monitor;
+
         const requiredArtifacts = getRequiredArtifacts(
           options.manifest,
           event,
@@ -398,7 +404,7 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
             resultFilePath: materializedRun.resultFilePath,
             logFilePath: materializedRun.logFilePath
           }),
-          ...(options.monitor ? { monitor: options.monitor } : {})
+          ...(perDeliveryMonitor ? { monitor: perDeliveryMonitor } : {})
         });
 
         if (!processResult.result) {
