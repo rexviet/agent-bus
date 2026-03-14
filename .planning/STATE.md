@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Production Hardening
 status: in_progress
-stopped_at: Plan 05-01 complete
-last_updated: "2026-03-14T09:39:05.000Z"
-last_activity: 2026-03-14 — Plan 05-01 complete (timeout field added to manifest schema)
+stopped_at: Plan 05-02 complete
+last_updated: "2026-03-14T14:23:00.000Z"
+last_activity: 2026-03-14 — Plan 05-02 complete (process group kill + SIGKILL escalation)
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 12
-  completed_plans: 1
-  percent: 8
+  completed_plans: 2
+  percent: 17
 ---
 
 # Project State
@@ -26,24 +26,24 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Phase: 5 of 8 in v1.1 (Foundation Safety)
-Plan: 1 of 3 (05-01 complete)
+Plan: 2 of 3 (05-02 complete) — Process group kill + SIGKILL escalation
 Status: In progress
-Last activity: 2026-03-14 — Plan 05-01 complete (timeout field added to manifest schema)
+Last activity: 2026-03-14 — Plan 05-02 complete (SIGTERM→SIGKILL escalation implemented)
 
-Progress: [█░░░░░░░░░] 8% (v1.1) — 1 of 12 plans complete
+Progress: [██░░░░░░░░] 17% (v1.1) — 2 of 12 plans complete
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1 (v1.1)
-- Average duration: 1 min
-- Total execution time: 1 min
+- Total plans completed: 2 (v1.1)
+- Average duration: 23 min
+- Total execution time: 46 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 5 (Foundation Safety) | 1/3 | 1 min | 1 min |
+| 5 (Foundation Safety) | 2/3 | 46 min | 23 min |
 
 *Updated after each plan completion*
 
@@ -53,6 +53,9 @@ Progress: [█░░░░░░░░░] 8% (v1.1) — 1 of 12 plans complete
 
 Recent decisions affecting v1.1 work:
 
+- [Plan 05-02]: SIGKILL grace period fixed at 5000ms (SIGKILL_GRACE_MS constant, non-configurable in v1.1)
+- [Plan 05-02]: Process spawning uses `detached: true` without `unref()` for process group management
+- [Plan 05-02]: Result file unconditionally deleted after SIGKILL via `rm(resultFilePath, { force: true })`
 - [Plan 05-01]: Timeout field optional in manifest for backward-compatibility; stored as seconds (conversion to ms in adapter-worker)
 - [Pre-v1.1]: Use `pino ^9.0.0` for structured daemon logging (verify ESM import before Phase 6 implementation)
 - [Pre-v1.1]: MCP server must use HTTP localhost transport (not stdio) to avoid corrupting daemon output streams
@@ -72,6 +75,6 @@ Recent decisions affecting v1.1 work:
 
 ## Session Continuity
 
-Last session: 2026-03-14T09:39:05.000Z
-Stopped at: Plan 05-01 complete, ready for Plan 05-02
-Resume file: .planning/phases/05-foundation-safety/05-02-PLAN.md
+Last session: 2026-03-14T14:23:00.000Z
+Stopped at: Plan 05-02 complete, ready for Plan 05-03 (wiring timeout from manifest to daemon)
+Resume file: .planning/phases/05-foundation-safety/05-03-PLAN.md
