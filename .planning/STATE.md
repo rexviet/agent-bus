@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Production Hardening
-status: planning
-stopped_at: Phase 5 context gathered
-last_updated: "2026-03-14T09:24:16.513Z"
-last_activity: 2026-03-14 — v1.1 roadmap created (Phases 5-8)
+status: in_progress
+stopped_at: Plan 05-01 complete
+last_updated: "2026-03-14T09:39:05.000Z"
+last_activity: 2026-03-14 — Plan 05-01 complete (timeout field added to manifest schema)
 progress:
   total_phases: 4
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_plans: 12
+  completed_plans: 1
+  percent: 8
 ---
 
 # Project State
@@ -26,24 +26,24 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Phase: 5 of 8 in v1.1 (Foundation Safety)
-Plan: — of — (not yet planned)
-Status: Ready to plan
-Last activity: 2026-03-14 — v1.1 roadmap created (Phases 5-8)
+Plan: 1 of 3 (05-01 complete)
+Status: In progress
+Last activity: 2026-03-14 — Plan 05-01 complete (timeout field added to manifest schema)
 
-Progress: [░░░░░░░░░░] 0% (v1.1)
+Progress: [█░░░░░░░░░] 8% (v1.1) — 1 of 12 plans complete
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 0 (v1.1)
-- Average duration: —
-- Total execution time: —
+- Total plans completed: 1 (v1.1)
+- Average duration: 1 min
+- Total execution time: 1 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 5 (Foundation Safety) | 1/3 | 1 min | 1 min |
 
 *Updated after each plan completion*
 
@@ -53,6 +53,7 @@ Progress: [░░░░░░░░░░] 0% (v1.1)
 
 Recent decisions affecting v1.1 work:
 
+- [Plan 05-01]: Timeout field optional in manifest for backward-compatibility; stored as seconds (conversion to ms in adapter-worker)
 - [Pre-v1.1]: Use `pino ^9.0.0` for structured daemon logging (verify ESM import before Phase 6 implementation)
 - [Pre-v1.1]: MCP server must use HTTP localhost transport (not stdio) to avoid corrupting daemon output streams
 - [Pre-v1.1]: Process group kill (`-pid`) required for timeout — SIGTERM to direct child does not reach grandchildren
@@ -71,6 +72,6 @@ Recent decisions affecting v1.1 work:
 
 ## Session Continuity
 
-Last session: 2026-03-14T09:24:16.510Z
-Stopped at: Phase 5 context gathered
-Resume file: .planning/phases/05-foundation-safety/05-CONTEXT.md
+Last session: 2026-03-14T09:39:05.000Z
+Stopped at: Plan 05-01 complete, ready for Plan 05-02
+Resume file: .planning/phases/05-foundation-safety/05-02-PLAN.md
