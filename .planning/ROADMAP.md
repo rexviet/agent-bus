@@ -31,7 +31,12 @@ Phases 1-4 delivered the core event-driven orchestration runtime: manifest-drive
   2. Sending SIGTERM kills the entire agent process group (not just the direct child), so shell wrappers and grandchild processes are terminated
   3. After SIGTERM, the daemon escalates to SIGKILL if the process group does not exit within the configured grace period
   4. A timed-out delivery is rescheduled for retry rather than immediately moved to the dead-letter queue
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 05-01-PLAN.md — Add `timeout` field to AgentSchema (manifest schema + tests)
+- [ ] 05-02-PLAN.md — Process group kill + SIGKILL escalation in process-runner.ts (fixture + tests)
+- [ ] 05-03-PLAN.md — Per-delivery monitor wiring + timeout-retry integration test in adapter-worker.ts
 
 ### Phase 6: Structured Logging
 **Goal**: Operators can filter and correlate daemon log output by delivery or agent without additional tooling
@@ -70,7 +75,7 @@ Phases 1-4 delivered the core event-driven orchestration runtime: manifest-drive
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 5. Foundation Safety | v1.1 | 0/? | Not started | - |
+| 5. Foundation Safety | v1.1 | 0/3 | Not started | - |
 | 6. Structured Logging | v1.1 | 0/? | Not started | - |
 | 7. Concurrent Workers | v1.1 | 0/? | Not started | - |
 | 8. Embedded MCP Server | v1.1 | 0/? | Not started | - |
