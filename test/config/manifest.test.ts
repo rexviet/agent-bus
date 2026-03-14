@@ -150,3 +150,96 @@ artifactConventions: []
   assert.equal(manifest.agents[0]?.workingDirectory, "apps/adapter-runner");
   assert.equal(manifest.agents[0]?.environment.OPENCODE_AGENT, "implement");
 });
+
+test("parseManifestText with timeout: 30 parses successfully with timeout as number", () => {
+  const manifest = parseManifestText(`
+version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+agents:
+  - id: agent_with_timeout
+    runtime: codex
+    command: [codex, run]
+    timeout: 30
+subscriptions:
+  - agentId: agent_with_timeout
+    topic: test_topic
+approvalGates: []
+artifactConventions: []
+`);
+
+  assert.equal(manifest.agents[0]?.timeout, 30);
+});
+
+test("parseManifestText without timeout field parses successfully with timeout as undefined", () => {
+  const manifest = parseManifestText(`
+version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+agents:
+  - id: agent_without_timeout
+    runtime: codex
+    command: [codex, run]
+subscriptions:
+  - agentId: agent_without_timeout
+    topic: test_topic
+approvalGates: []
+artifactConventions: []
+`);
+
+  assert.equal(manifest.agents[0]?.timeout, undefined);
+});
+
+test("parseManifestText with timeout: 0 throws ManifestValidationError", () => {
+  assert.throws(
+    () =>
+      parseManifestText(`
+version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+agents:
+  - id: agent_with_zero_timeout
+    runtime: codex
+    command: [codex, run]
+    timeout: 0
+subscriptions:
+  - agentId: agent_with_zero_timeout
+    topic: test_topic
+approvalGates: []
+artifactConventions: []
+`),
+    (error: unknown) =>
+      error instanceof ManifestValidationError
+  );
+});
+
+test("parseManifestText with timeout: -5 throws ManifestValidationError", () => {
+  assert.throws(
+    () =>
+      parseManifestText(`
+version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+agents:
+  - id: agent_with_negative_timeout
+    runtime: codex
+    command: [codex, run]
+    timeout: -5
+subscriptions:
+  - agentId: agent_with_negative_timeout
+    topic: test_topic
+approvalGates: []
+artifactConventions: []
+`),
+    (error: unknown) =>
+      error instanceof ManifestValidationError
+  );
+});

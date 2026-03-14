@@ -4,6 +4,8 @@ import { createWriteStream } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 
+const SIGKILL_GRACE_MS = 5_000;
+
 import {
   type AdapterResultEnvelope,
   type AdapterWorkPackage,
@@ -95,7 +97,8 @@ export async function runPreparedAdapterCommand(
         ...process.env,
         ...input.execution.environment
       },
-      stdio: ["ignore", "pipe", "pipe"]
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true
     });
 
     const monitor = input.monitor;
@@ -125,11 +128,25 @@ export async function runPreparedAdapterCommand(
       monitor.onStart({ pid, command: commandString, startedAt });
     }
 
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let sigTermHandle: ReturnType<typeof setTimeout> | undefined;
+    let sigKillHandle: ReturnType<typeof setTimeout> | undefined;
 
-    if (monitor?.timeoutMs !== undefined) {
-      timeoutHandle = setTimeout(() => {
-        child.kill("SIGTERM");
+    if (monitor?.timeoutMs !== undefined && child.pid !== undefined) {
+      const pid = child.pid;
+      sigTermHandle = setTimeout(() => {
+        try {
+          process.kill(-pid, "SIGTERM");
+        } catch {
+          // ESRCH: process already exited
+        }
+        sigKillHandle = setTimeout(async () => {
+          try {
+            process.kill(-pid, "SIGKILL");
+          } catch {
+            // ESRCH: already dead
+          }
+          await rm(input.materializedRun.resultFilePath, { force: true });
+        }, SIGKILL_GRACE_MS);
       }, monitor.timeoutMs);
     }
 
@@ -143,8 +160,11 @@ export async function runPreparedAdapterCommand(
       });
     });
 
-    if (timeoutHandle !== undefined) {
-      clearTimeout(timeoutHandle);
+    if (sigTermHandle !== undefined) {
+      clearTimeout(sigTermHandle);
+    }
+    if (sigKillHandle !== undefined) {
+      clearTimeout(sigKillHandle);
     }
 
     if (monitor?.onComplete && child.pid !== undefined) {

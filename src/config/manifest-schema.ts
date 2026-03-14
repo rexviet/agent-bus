@@ -53,6 +53,7 @@ const AgentSchema = z.object({
   identityFile: z.string().min(1).optional(),
   command: CommandSchema,
   workingDirectory: RelativeDirectorySchema.optional(),
+  timeout: z.number().positive().optional(),
   environment: z.record(z.string(), z.string()).default({})
 });
 
