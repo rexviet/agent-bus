@@ -40,7 +40,7 @@ created: 2026-03-14
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
 | 6-01-01 | 01 | 1 | LOG-01 | unit | `npm run build && node --experimental-sqlite --test dist/test/daemon/adapter-worker.test.js` | ✅ (extend existing) | ⬜ pending |
 | 6-01-02 | 01 | 1 | LOG-02 | unit | `npm run build && node --experimental-sqlite --test dist/test/daemon/adapter-worker.test.js` | ✅ (extend existing) | ⬜ pending |
-| 6-01-03 | 01 | 1 | LOG-03 | unit | `npm run build && node --experimental-sqlite --test dist/test/cli/worker-command.test.js` | ✅ (extend existing) | ⬜ pending |
+| 6-02-01 | 02 | 2 | LOG-03 | unit | `npm run build && node --experimental-sqlite --test dist/test/cli/worker-command.test.js` | ✅ (extend existing) | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
