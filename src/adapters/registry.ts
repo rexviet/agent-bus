@@ -1,3 +1,5 @@
+import * as path from "node:path";
+
 import { z } from "zod";
 
 import type { AgentBusManifest } from "../config/manifest-schema.js";
@@ -150,7 +152,10 @@ export function buildAdapterCommand(
     workPackagePath: input.workPackagePath,
     resultFilePath: input.resultFilePath,
     logFilePath: input.logFilePath,
-    baseEnvironment: buildBaseEnvironment(input)
+    baseEnvironment: buildBaseEnvironment(input),
+    ...(input.agent.identityFile
+      ? { identityFilePath: path.resolve(input.workingDirectory, input.agent.identityFile) }
+      : {})
   };
 
   switch (runtimeDefinition.family) {

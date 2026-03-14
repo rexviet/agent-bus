@@ -50,6 +50,7 @@ const AgentSchema = z.object({
   id: AgentIdSchema,
   runtime: z.string().min(1),
   description: z.string().min(1).optional(),
+  identityFile: z.string().min(1).optional(),
   command: CommandSchema,
   workingDirectory: RelativeDirectorySchema.optional(),
   environment: z.record(z.string(), z.string()).default({})

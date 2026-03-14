@@ -10,6 +10,7 @@ export interface VendorAdapterCommandInput {
   readonly resultFilePath: string;
   readonly logFilePath: string;
   readonly baseEnvironment: Readonly<Record<string, string>>;
+  readonly identityFilePath?: string;
 }
 
 function hasArgument(
@@ -63,14 +64,27 @@ function buildGeminiPrompt(input: VendorAdapterCommandInput): string {
     input.workPackagePath
   );
 
-  return [
+  const parts = [
     "You are running as a Gemini CLI worker inside Agent Bus.",
-    `Read the attached work package JSON first: @${workPackageAttachmentPath}`,
+    `Read the attached work package JSON first: @${workPackageAttachmentPath}`
+  ];
+
+  if (input.identityFilePath) {
+    const identityAttachmentPath = toGeminiAttachmentPath(
+      input.workingDirectory,
+      input.identityFilePath
+    );
+    parts.push(`Your role and task instructions are defined in: @${identityAttachmentPath}`);
+  }
+
+  parts.push(
     `Use "${input.workingDirectory}" as the repository working directory.`,
     "The work package is the source of truth for artifact inputs, follow-up events, and output expectations.",
     `Write the final Agent Bus result envelope JSON to "${input.resultFilePath}".`,
     "Do not print the result envelope to stdout."
-  ].join(" ");
+  );
+
+  return parts.join(" ");
 }
 
 export function buildGeminiCommand(
