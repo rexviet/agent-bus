@@ -382,9 +382,8 @@ export async function runWorkerCommand(
           encounteredError = true;
           writeError(
             io.stderr,
-            error instanceof Error ? error.message : "Worker iteration failed."
+            `${slotWorkerId}: ${error instanceof Error ? error.message : "Worker iteration failed."}`
           );
-          stopController.request("iteration failed");
           break;
         } finally {
           inFlightIterations -= 1;
