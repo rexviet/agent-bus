@@ -386,6 +386,10 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
   let sigKillHandle: ReturnType<typeof setTimeout> | undefined;
 
   return {
+    // Sends SIGTERM then SIGKILL (after 5s) to all in-flight child process
+    // groups. Uses negative PID (-pid) which targets the process group.
+    // This depends on process-runner.ts spawning children with detached: true
+    // so each child is a process group leader.
     forceKillInFlight(): void {
       for (const pid of inFlightPids) {
         try {

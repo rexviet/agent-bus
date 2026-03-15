@@ -335,6 +335,9 @@ export async function runWorkerCommand(
   try {
     const waitForNextPoll = () =>
       Promise.race([sleep(pollIntervalMs), stopController.waitForStop()]);
+    // --once processes exactly one delivery, so only one slot is needed
+    // regardless of the configured concurrency. The startup banner still
+    // shows the configured concurrency value for operator awareness.
     const slotCount = once ? 1 : concurrency;
     type IterationStart =
       | { readonly started: false }
@@ -347,6 +350,12 @@ export async function runWorkerCommand(
       const slotWorkerId = `${workerId}/${slotIndex}`;
 
       while (!stopController.requested) {
+        // The mutex serializes the claim start. daemon.runWorkerIteration()
+        // calls deliveryService.claim() synchronously before its first await
+        // (adapter-worker.ts), so the claim completes inside the mutex window.
+        // The returned promise is awaited outside the mutex, allowing parallel
+        // agent execution. If runWorkerIteration's claim is ever made async,
+        // this mutex guarantee breaks.
         const iterationStart = await claimMutex.run<IterationStart>(() => {
           if (stopController.requested || inFlightIterations >= concurrency) {
             return { started: false };

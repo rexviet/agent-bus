@@ -264,7 +264,7 @@ function parseDaemonLogLines(stderr: string): ParsedDaemonLogLine[] {
     .map((line) => JSON.parse(line) as ParsedDaemonLogLine);
 }
 
-function buildDelayedSuccessManifest(delayMs: number): string {
+function buildDelayedSuccessManifest(): string {
   return `version: 1
 workspace:
   artifactsDir: workspace
@@ -414,7 +414,7 @@ test("worker validates numeric options and required option values", async () => 
 
     assert.equal(missingLogLevelValue.exitCode, 1);
     assert.match(missingLogLevelValue.stderr, /Worker option --log-level requires a value/);
-    assert.match(missingLogLevelValue.stderr, /--concurrency N/);
+    assert.match(missingLogLevelValue.stderr, /--log-level level/);
   });
 });
 
@@ -539,7 +539,7 @@ test("worker runs deliveries concurrently when --concurrency is greater than one
         await worker.exit.catch(() => undefined);
       }
     },
-    buildDelayedSuccessManifest(500)
+    buildDelayedSuccessManifest()
   );
 });
 
@@ -602,7 +602,7 @@ test("worker defaults to sequential execution when --concurrency is omitted", as
         await worker.exit.catch(() => undefined);
       }
     },
-    buildDelayedSuccessManifest(400)
+    buildDelayedSuccessManifest()
   );
 });
 
@@ -645,7 +645,7 @@ test("worker drains in-flight deliveries on SIGTERM before exit", async () => {
         await worker.exit.catch(() => undefined);
       }
     },
-    buildDelayedSuccessManifest(350)
+    buildDelayedSuccessManifest()
   );
 });
 
