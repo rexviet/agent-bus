@@ -39,8 +39,10 @@ Confirm:
 - the phase exists in `.gsd/phases/{N}/`
 - execution artifacts are present for that phase
 - `.planning/phases/<NN-slug>/` exists for the same phase number
+- `.planning/ROADMAP.md` and `.planning/STATE.md` have not diverged since the last `/sync-planning-to-gsd`
 
 If the phase was never synced from planning in the first place, stop and repair the planning side first.
+If planning continued in Claude Code after the last sync, stop and merge or re-sync deliberately before running handoff.
 
 ---
 
@@ -55,7 +57,9 @@ This script:
 - maps `.gsd/STATE.md` back to `.planning/STATE.md`
 - maps execution artifacts such as `*-SUMMARY.md`, `VERIFICATION.md`, and new gap-closure plans back into `.planning/phases/<NN-slug>/`
 - removes auto-generated projection notices
+- validates the planning root docs still match the last synced source snapshot before overwriting them
 - rewrites `.gsd/...` references back to `.planning/...`
+- strips execution-only next-step guidance such as `/handoff-execution {N}` from canonical planning state
 - restores planning-style phase frontmatter such as `phase: 06-structured-logging`
 
 ---

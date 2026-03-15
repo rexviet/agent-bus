@@ -61,6 +61,7 @@ node scripts/sync-planning-to-gsd.mjs --phase 6 --phases-only
 - Maps `.planning/phases/<NN-slug>/` into `.gsd/phases/{N}/`
 - Rewrites embedded `.planning/...` references to `.gsd/...`
 - Rewrites phase file names like `06-01-PLAN.md` to `01-PLAN.md`
+- Stamps generated root and phase files with a source fingerprint so `/handoff-execution` can detect canonical planning drift safely
 - Preserves Antigravity/Codex-facing `.gsd` structure
 - Does not project `.planning/quick/`; standalone quick tasks execute directly from `.planning/` via `/quick`
 

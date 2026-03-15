@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -309,13 +310,23 @@ function transformPhaseContent(content, options) {
     targetBaseName: options.targetBaseName
   });
 
-  return injectGeneratedNotice(output, options.source);
+  return injectGeneratedNotice(
+    output,
+    options.source,
+    [],
+    createContentFingerprint(content)
+  );
 }
 
 function transformContent(content, options) {
   const rewritten = rewriteKnownPaths(content, options.pathMap);
 
-  return injectGeneratedNotice(rewritten, options.source, options.extraLines ?? []);
+  return injectGeneratedNotice(
+    rewritten,
+    options.source,
+    options.extraLines ?? [],
+    createContentFingerprint(content)
+  );
 }
 
 function rewriteKnownPaths(content, pathMap) {
@@ -374,9 +385,9 @@ function rewritePhaseFrontmatter(content, options) {
   return `---\n${frontmatterLines.join("\n")}\n---\n${content.slice(bodyStart)}`;
 }
 
-function injectGeneratedNotice(content, source, extraLines = []) {
+function injectGeneratedNotice(content, source, extraLines = [], sourceFingerprint = null) {
   const noticeLines = [
-    `<!-- AUTO-GENERATED from ${source} by scripts/sync-planning-to-gsd.mjs. Edit the source file, not this projection. -->`,
+    `<!-- AUTO-GENERATED from ${source} by scripts/sync-planning-to-gsd.mjs.${sourceFingerprint ? ` source-sha256: ${sourceFingerprint}.` : ""} Edit the source file, not this projection. -->`,
     ...extraLines
   ];
   const noticeBlock = `${noticeLines.join("\n")}\n\n`;
@@ -393,6 +404,10 @@ function injectGeneratedNotice(content, source, extraLines = []) {
 
 function ensureTrailingNewline(content) {
   return content.endsWith("\n") ? content : `${content}\n`;
+}
+
+function createContentFingerprint(content) {
+  return createHash("sha256").update(content).digest("hex");
 }
 
 async function writeRelativeFile(relativePath, content) {

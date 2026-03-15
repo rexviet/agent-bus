@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const repoRoot = process.cwd();
 const planningRoot = path.join(repoRoot, ".planning");
 const gsdRoot = path.join(repoRoot, ".gsd");
+const GENERATED_NOTICE_PATTERN =
+  /^<!-- AUTO-GENERATED from .*? by scripts\/sync-planning-to-gsd\.mjs\.(?: source-sha256: ([a-f0-9]+)\.)? Edit the source file, not this projection\. -->\r?\n?/m;
 const args = parseArgs(process.argv.slice(2));
 
 const phaseDirectories = await loadPlanningPhaseDirectories();
@@ -13,7 +16,7 @@ const selectedPhaseDirectory = selectPhaseDirectory(phaseDirectories, args.phase
 const reversePathMap = await buildReversePathMap(phaseDirectories);
 
 const touchedFiles = [];
-touchedFiles.push(...(await handoffRootDocs(reversePathMap)));
+touchedFiles.push(...(await handoffRootDocs(reversePathMap, args.phaseNumber)));
 touchedFiles.push(...(await handoffPhaseDirectory(selectedPhaseDirectory, reversePathMap)));
 
 process.stdout.write(
@@ -118,7 +121,7 @@ function mapPlanningFileNameToGsd(fileName, phasePrefix) {
   return fileName;
 }
 
-async function handoffRootDocs(reversePathMap) {
+async function handoffRootDocs(reversePathMap, phaseNumber) {
   const mappings = [
     {
       source: ".gsd/ROADMAP.md",
@@ -130,14 +133,45 @@ async function handoffRootDocs(reversePathMap) {
     }
   ];
 
+  const records = await Promise.all(
+    mappings.map(async (mapping) => {
+      const sourceAbsolutePath = path.join(repoRoot, mapping.source);
+      const targetAbsolutePath = path.join(repoRoot, mapping.target);
+      const [sourceContent, targetContent] = await Promise.all([
+        readFile(sourceAbsolutePath, "utf8"),
+        readFile(targetAbsolutePath, "utf8")
+      ]);
+
+      return {
+        mapping,
+        sourceAbsolutePath,
+        targetAbsolutePath,
+        sourceContent,
+        targetContent
+      };
+    })
+  );
   const touched = [];
 
-  for (const mapping of mappings) {
-    const sourceContent = await readFile(path.join(repoRoot, mapping.source), "utf8");
-    const transformed = transformRootContent(sourceContent, reversePathMap);
+  for (const record of records) {
+    await assertPlanningRootIsSafeToOverwrite({
+      sourceRelativePath: record.mapping.source,
+      sourceAbsolutePath: record.sourceAbsolutePath,
+      sourceContent: record.sourceContent,
+      targetRelativePath: record.mapping.target,
+      targetAbsolutePath: record.targetAbsolutePath,
+      targetContent: record.targetContent
+    });
+  }
 
-    await writeRelativeFile(mapping.target, transformed);
-    touched.push(mapping.target);
+  for (const record of records) {
+    const transformed = transformRootContent(record.sourceContent, reversePathMap, {
+      targetRelativePath: record.mapping.target,
+      phaseNumber
+    });
+
+    await writeRelativeFile(record.mapping.target, transformed);
+    touched.push(record.mapping.target);
   }
 
   return touched;
@@ -201,9 +235,40 @@ function mapGsdFileNameToPlanning(fileName, phasePrefix) {
   return `${phasePrefix}-${fileName}`;
 }
 
-function transformRootContent(content, reversePathMap) {
+async function assertPlanningRootIsSafeToOverwrite(options) {
+  const fingerprint = extractSourceFingerprint(options.sourceContent);
+
+  if (fingerprint) {
+    if (createContentFingerprint(options.targetContent) !== fingerprint) {
+      throw new Error(
+        `Refusing to hand off ${options.sourceRelativePath}: ${options.targetRelativePath} changed in .planning since the last /sync-planning-to-gsd. Re-sync or merge the canonical planning docs first.`
+      );
+    }
+
+    return;
+  }
+
+  const [sourceStats, targetStats] = await Promise.all([
+    stat(options.sourceAbsolutePath),
+    stat(options.targetAbsolutePath)
+  ]);
+
+  if (targetStats.mtimeMs > sourceStats.mtimeMs) {
+    throw new Error(
+      `Refusing to hand off ${options.sourceRelativePath}: ${options.targetRelativePath} is newer than the execution projection. Re-sync planning into .gsd or merge manually before handoff.`
+    );
+  }
+}
+
+function transformRootContent(content, reversePathMap, options) {
   const stripped = stripGeneratedNotice(content);
-  return ensureTrailingNewline(rewriteKnownPaths(stripped, reversePathMap));
+  const rewritten = rewriteKnownPaths(stripped, reversePathMap);
+
+  if (options.targetRelativePath !== ".planning/STATE.md") {
+    return ensureTrailingNewline(rewritten);
+  }
+
+  return ensureTrailingNewline(rewriteExecutionStateHints(rewritten, options.phaseNumber));
 }
 
 function transformPhaseContent(content, options) {
@@ -219,13 +284,25 @@ function transformPhaseContent(content, options) {
 
 function stripGeneratedNotice(content) {
   return content
-    .replace(
-      /^<!-- AUTO-GENERATED from .*? by scripts\/sync-planning-to-gsd\.mjs\. Edit the source file, not this projection\. -->\r?\n?/m,
-      ""
-    )
+    .replace(GENERATED_NOTICE_PATTERN, "")
     .replace(/^> \*\*Status\*\*: `FINALIZED`\r?\n?/m, "")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/^\r?\n/, "");
+}
+
+function extractSourceFingerprint(content) {
+  const match = content.match(GENERATED_NOTICE_PATTERN);
+  return match?.[1] ?? null;
+}
+
+function rewriteExecutionStateHints(content, phaseNumber) {
+  return content.replace(
+    new RegExp(
+      `(^Next:\\s*)Run \`/handoff-execution ${phaseNumber}\`, then\\s+([a-z])`,
+      "m"
+    ),
+    (_match, prefix, firstLetter) => `${prefix}${firstLetter.toUpperCase()}`
+  );
 }
 
 function rewriteKnownPaths(content, reversePathMap, selectedPhaseDirectory = null) {
@@ -300,6 +377,10 @@ function rewritePhaseFrontmatter(content, options) {
 
 function ensureTrailingNewline(content) {
   return content.endsWith("\n") ? content : `${content}\n`;
+}
+
+function createContentFingerprint(content) {
+  return createHash("sha256").update(content).digest("hex");
 }
 
 async function writeRelativeFile(relativePath, content) {
