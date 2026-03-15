@@ -22,6 +22,7 @@ import {
 import type { ProcessMonitorCallbacks } from "../adapters/process-runner.js";
 import { createDeliveryService } from "./delivery-service.js";
 import { createDispatcher, type Dispatcher } from "./dispatcher.js";
+import type { DaemonLogger } from "./logger.js";
 import { createOperatorService } from "./operator-service.js";
 import { publishEvent } from "./publish-event.js";
 import { createRecoveryScan } from "./recovery-scan.js";
@@ -42,6 +43,7 @@ export interface StartDaemonOptions {
   readonly registerSignalHandlers?: boolean;
   readonly databasePath?: string;
   readonly monitor?: ProcessMonitorCallbacks;
+  readonly logger?: DaemonLogger;
 }
 
 export interface AgentBusDaemon {
@@ -175,6 +177,7 @@ export async function startDaemon(
     deliveryStore,
     deliveryService,
     dispatcher,
+    ...(options.logger ? { logger: options.logger } : {}),
     ...(options.monitor ? { monitor: options.monitor } : {})
   };
   const adapterWorker = createAdapterWorker(adapterWorkerOptions);

@@ -6,6 +6,10 @@ import { test } from "node:test";
 
 import { startDaemon } from "../../src/daemon/index.js";
 import { parseEventEnvelope } from "../../src/domain/event-envelope.js";
+import {
+  createDaemonLogger,
+  type DaemonLogDestination
+} from "../../src/daemon/logger.js";
 import { openSqliteDatabase } from "../../src/storage/sqlite-client.js";
 
 const successAdapterPath = path.resolve(
@@ -33,6 +37,45 @@ async function withTempRepo(
     await callback(configPath, repositoryRoot);
   } finally {
     await rm(repositoryRoot, { recursive: true, force: true });
+  }
+}
+
+function createLogCapture(): {
+  readonly destination: DaemonLogDestination;
+  readEntries(): Array<Record<string, unknown>>;
+} {
+  let output = "";
+
+  return {
+    destination: {
+      write(message: string): void {
+        output += message;
+      }
+    },
+    readEntries(): Array<Record<string, unknown>> {
+      return output
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+    }
+  };
+}
+
+function assertCorrelationFields(
+  entries: readonly Record<string, unknown>[],
+  expected: {
+    readonly deliveryId: string;
+    readonly agentId: string;
+    readonly runId: string;
+  }
+): void {
+  for (const entry of entries) {
+    assert.equal(entry.deliveryId, expected.deliveryId);
+    assert.equal(entry.agentId, expected.agentId);
+    assert.equal(entry.runId, expected.runId);
+    assert.equal(typeof entry.level, "number");
+    assert.equal(typeof entry.timestamp, "string");
   }
 }
 
@@ -469,6 +512,311 @@ artifactConventions: []
         assert.ok(execution);
         assert.equal(execution?.status, "success");
         assert.equal(execution?.delivery.status, "completed");
+      } finally {
+        await daemon.stop();
+      }
+    }
+  );
+});
+
+test("runWorkerIteration logs success lifecycle events with correlation fields", async () => {
+  await withTempRepo(
+    `version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+
+agents:
+  - id: coder_open_code
+    runtime: open-code
+    command: ["${process.execPath}", "${successAdapterPath}"]
+
+subscriptions:
+  - agentId: coder_open_code
+    topic: implementation_ready
+
+approvalGates: []
+artifactConventions: []
+`,
+    async (configPath, repositoryRoot) => {
+      const capture = createLogCapture();
+      const daemon = await startDaemon({
+        configPath,
+        repositoryRoot,
+        registerSignalHandlers: false,
+        recoveryIntervalMs: 5_000,
+        logger: createDaemonLogger("info", capture.destination)
+      });
+
+      try {
+        daemon.publish(
+          parseEventEnvelope({
+            eventId: "550e8400-e29b-41d4-a716-446655440351",
+            topic: "implementation_ready",
+            runId: "run-adapter-log-success-001",
+            correlationId: "run-adapter-log-success-001",
+            dedupeKey: "implementation_ready:run-adapter-log-success-001",
+            occurredAt: "2026-03-10T06:00:00Z",
+            producer: {
+              agentId: "planner_codex",
+              runtime: "codex"
+            },
+            payload: {},
+            payloadMetadata: {},
+            artifactRefs: []
+          })
+        );
+
+        const execution = await daemon.runWorkerIteration("worker-log-success", 60_000);
+
+        assert.ok(execution);
+        assert.equal(execution.status, "success");
+
+        const entries = capture.readEntries();
+
+        assert.deepEqual(
+          entries.map((entry) => entry.event),
+          ["delivery.claimed", "agent.started", "delivery.completed"]
+        );
+        assertCorrelationFields(entries, {
+          deliveryId: execution.delivery.deliveryId,
+          agentId: "coder_open_code",
+          runId: "run-adapter-log-success-001"
+        });
+      } finally {
+        await daemon.stop();
+      }
+    }
+  );
+});
+
+test("runWorkerIteration logs retry scheduling for retryable adapter failures", async () => {
+  await withTempRepo(
+    `version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+
+agents:
+  - id: coder_open_code
+    runtime: open-code
+    command: ["${process.execPath}", "${failAdapterPath}"]
+
+subscriptions:
+  - agentId: coder_open_code
+    topic: implementation_ready
+
+approvalGates: []
+artifactConventions: []
+`,
+    async (configPath, repositoryRoot) => {
+      const capture = createLogCapture();
+      const daemon = await startDaemon({
+        configPath,
+        repositoryRoot,
+        registerSignalHandlers: false,
+        recoveryIntervalMs: 5_000,
+        logger: createDaemonLogger("info", capture.destination)
+      });
+
+      try {
+        daemon.publish(
+          parseEventEnvelope({
+            eventId: "550e8400-e29b-41d4-a716-446655440352",
+            topic: "implementation_ready",
+            runId: "run-adapter-log-retry-001",
+            correlationId: "run-adapter-log-retry-001",
+            dedupeKey: "implementation_ready:run-adapter-log-retry-001",
+            occurredAt: "2026-03-10T06:05:00Z",
+            producer: {
+              agentId: "planner_codex",
+              runtime: "codex"
+            },
+            payload: {
+              mode: "retryable"
+            },
+            payloadMetadata: {},
+            artifactRefs: []
+          })
+        );
+
+        const execution = await daemon.runWorkerIteration("worker-log-retry", 60_000);
+
+        assert.ok(execution);
+        assert.equal(execution.status, "retryable_error");
+
+        const entries = capture.readEntries();
+
+        assert.deepEqual(
+          entries.map((entry) => entry.event),
+          ["delivery.claimed", "agent.started", "delivery.retry_scheduled"]
+        );
+        assert.equal(entries[2]?.errorMessage, "Temporary adapter failure.");
+        assert.equal(entries[2]?.level, 30);
+        assertCorrelationFields(entries, {
+          deliveryId: execution.delivery.deliveryId,
+          agentId: "coder_open_code",
+          runId: "run-adapter-log-retry-001"
+        });
+      } finally {
+        await daemon.stop();
+      }
+    }
+  );
+});
+
+test("runWorkerIteration logs dead-lettering for fatal adapter failures", async () => {
+  await withTempRepo(
+    `version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+
+agents:
+  - id: qa_gemini
+    runtime: gemini
+    command: ["${process.execPath}", "${failAdapterPath}"]
+
+subscriptions:
+  - agentId: qa_gemini
+    topic: qa_ready
+
+approvalGates: []
+artifactConventions: []
+`,
+    async (configPath, repositoryRoot) => {
+      const capture = createLogCapture();
+      const daemon = await startDaemon({
+        configPath,
+        repositoryRoot,
+        registerSignalHandlers: false,
+        recoveryIntervalMs: 5_000,
+        logger: createDaemonLogger("info", capture.destination)
+      });
+
+      try {
+        daemon.publish(
+          parseEventEnvelope({
+            eventId: "550e8400-e29b-41d4-a716-446655440353",
+            topic: "qa_ready",
+            runId: "run-adapter-log-dead-letter-001",
+            correlationId: "run-adapter-log-dead-letter-001",
+            dedupeKey: "qa_ready:run-adapter-log-dead-letter-001",
+            occurredAt: "2026-03-10T06:10:00Z",
+            producer: {
+              agentId: "planner_codex",
+              runtime: "codex"
+            },
+            payload: {
+              mode: "fatal"
+            },
+            payloadMetadata: {},
+            artifactRefs: []
+          })
+        );
+
+        const execution = await daemon.runWorkerIteration("worker-log-dead-letter", 60_000);
+
+        assert.ok(execution);
+        assert.equal(execution.status, "fatal_error");
+
+        const entries = capture.readEntries();
+
+        assert.deepEqual(
+          entries.map((entry) => entry.event),
+          ["delivery.claimed", "agent.started", "delivery.dead_lettered"]
+        );
+        assert.equal(entries[2]?.errorMessage, "Permanent adapter failure.");
+        assert.equal(entries[2]?.level, 50);
+        assertCorrelationFields(entries, {
+          deliveryId: execution.delivery.deliveryId,
+          agentId: "qa_gemini",
+          runId: "run-adapter-log-dead-letter-001"
+        });
+      } finally {
+        await daemon.stop();
+      }
+    }
+  );
+});
+
+test("runWorkerIteration logs dead-lettering for fatal setup errors after claim", async () => {
+  await withTempRepo(
+    `version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+
+agents:
+  - id: coder_open_code
+    runtime: open-code
+    command: ["${process.execPath}", "${successAdapterPath}"]
+
+subscriptions:
+  - agentId: coder_open_code
+    topic: implementation_ready
+    requiredArtifacts:
+      - path: docs/required.md
+        role: input
+
+approvalGates: []
+artifactConventions: []
+`,
+    async (configPath, repositoryRoot) => {
+      const capture = createLogCapture();
+      const daemon = await startDaemon({
+        configPath,
+        repositoryRoot,
+        registerSignalHandlers: false,
+        recoveryIntervalMs: 5_000,
+        logger: createDaemonLogger("info", capture.destination)
+      });
+
+      try {
+        daemon.publish(
+          parseEventEnvelope({
+            eventId: "550e8400-e29b-41d4-a716-446655440354",
+            topic: "implementation_ready",
+            runId: "run-adapter-log-setup-fatal-001",
+            correlationId: "run-adapter-log-setup-fatal-001",
+            dedupeKey: "implementation_ready:run-adapter-log-setup-fatal-001",
+            occurredAt: "2026-03-10T06:15:00Z",
+            producer: {
+              agentId: "planner_codex",
+              runtime: "codex"
+            },
+            payload: {},
+            payloadMetadata: {},
+            artifactRefs: []
+          })
+        );
+
+        const execution = await daemon.runWorkerIteration("worker-log-setup-fatal", 60_000);
+
+        assert.ok(execution);
+        assert.equal(execution.status, "process_error");
+        assert.equal(execution.delivery.status, "dead_letter");
+
+        const entries = capture.readEntries();
+
+        assert.deepEqual(
+          entries.map((entry) => entry.event),
+          ["delivery.claimed", "delivery.dead_lettered"]
+        );
+        assert.match(
+          String(entries[1]?.errorMessage),
+          /Required artifact docs\/required.md is missing/
+        );
+        assert.equal(entries[1]?.level, 50);
+        assertCorrelationFields(entries, {
+          deliveryId: execution.delivery.deliveryId,
+          agentId: "coder_open_code",
+          runId: "run-adapter-log-setup-fatal-001"
+        });
       } finally {
         await daemon.stop();
       }
