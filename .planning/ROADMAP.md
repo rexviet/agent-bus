@@ -63,8 +63,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 07-01-PLAN.md — CLI flags, mutex utility, output extensions, per-delivery verbose/workerId wiring
-- [ ] 07-02-PLAN.md — Concurrent slot-loop pool, drain logic, integration tests
+- [x] 07-01-PLAN.md — CLI flags, mutex utility, output extensions, per-delivery verbose/workerId wiring ✓ COMPLETE
+- [x] 07-02-PLAN.md — Concurrent slot-loop pool, drain logic, integration tests ✓ COMPLETE
 
 ### Phase 8: Embedded MCP Server
 **Goal**: Agents can publish follow-up events directly during execution by calling the MCP `publish_event` tool
@@ -85,5 +85,5 @@ Plans:
 |-------|-----------|----------------|--------|-----------|
 | 5. Foundation Safety | v1.1 | 3/3 | ✅ COMPLETE | 2026-03-14 |
 | 6. Structured Logging | v1.1 | 2/2 | ✅ COMPLETE | 2026-03-15 |
-| 7. Concurrent Workers | v1.1 | 0/2 | Not started | - |
+| 7. Concurrent Workers | v1.1 | 2/2 | ✅ COMPLETE | 2026-03-15 |
 | 8. Embedded MCP Server | v1.1 | 0/? | Not started | - |

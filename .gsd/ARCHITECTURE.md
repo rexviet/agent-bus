@@ -1,4 +1,4 @@
-<!-- AUTO-GENERATED from .planning/research/ARCHITECTURE.md by scripts/sync-planning-to-gsd.mjs. Edit the source file, not this projection. -->
+<!-- AUTO-GENERATED from .planning/research/ARCHITECTURE.md by scripts/sync-planning-to-gsd.mjs. source-sha256: 6b8220c74172b32b37f00a21805fb91601eae466045ccfde8230ee83218c40fb. Edit the source file, not this projection. -->
 
 # Architecture Patterns
 

@@ -1,4 +1,4 @@
-<!-- AUTO-GENERATED from .planning/REQUIREMENTS.md by scripts/sync-planning-to-gsd.mjs. Edit the source file, not this projection. -->
+<!-- AUTO-GENERATED from .planning/REQUIREMENTS.md by scripts/sync-planning-to-gsd.mjs. source-sha256: 4eed7323da8d5b48d48b04fc67f24bcf23725327bea0f35741754ecf22b08df7. Edit the source file, not this projection. -->
 
 # Requirements: Agent Bus
 

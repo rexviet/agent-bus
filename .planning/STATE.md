@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Production Hardening
 status: verifying
-stopped_at: Phase 7 context gathered
-last_updated: "2026-03-15T09:43:49.731Z"
-last_activity: 2026-03-15 — Phase 6 complete (structured lifecycle logging via pino)
+stopped_at: Phase 7 complete and verified
+last_updated: "2026-03-15T10:38:58Z"
+last_activity: 2026-03-15 — Phase 7 complete (concurrent worker slots, clean drain, drain-timeout escalation)
 progress:
   total_phases: 4
-  completed_phases: 2
-  total_plans: 5
-  completed_plans: 5
-  percent: 50
+  completed_phases: 3
+  total_plans: 7
+  completed_plans: 7
+  percent: 75
 ---
 
 # Project State
@@ -21,30 +21,31 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-14)
 
 **Core value:** Event-driven multi-agent orchestration with durable delivery and human-in-the-loop approval
-**Current focus:** Phase 7 — Concurrent Workers (planning required)
+**Current focus:** Phase 8 — Embedded MCP Server (planning required)
 
 ## Current Position
 
-Phase: 6 of 8 in v1.1 (Structured Logging)
-Plan: 2 of 2 complete — NDJSON lifecycle logging + worker log-level CLI
+Phase: 7 of 8 in v1.1 (Concurrent Workers)
+Plan: 2 of 2 complete — concurrency controls + concurrent slot loop/drain verification
 Status: Complete and verified
-Last activity: 2026-03-15 — Phase 6 complete (structured lifecycle logging via pino)
+Last activity: 2026-03-15 — Phase 7 complete (concurrent worker slots, clean drain, drain-timeout escalation)
 
-Progress: [█████░░░░░] 50% (v1.1) — 5 completed plans across phases 5-6
+Progress: [███████░░░] 75% (v1.1) — 7 completed plans across phases 5-7
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5 (v1.1)
-- Average duration: 11 min (56 total / 5 plans)
-- Total execution time: 56 min
+- Total plans completed: 7 (v1.1)
+- Newly completed this session: 2 (Phase 7)
+- Full regression suite: 98/98 passing after Phase 7
 
 **By Phase:**
 
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 5 (Foundation Safety) | 3/3 | 52 min | 17 min |
-| 6 (Structured Logging) | 2/2 | 4 min | 2 min |
+| Phase | Plans | Status | Notes |
+|-------|-------|--------|-------|
+| 5 (Foundation Safety) | 3/3 | ✅ Complete | Timeouts, process-group kill, retry-on-timeout |
+| 6 (Structured Logging) | 2/2 | ✅ Complete | NDJSON lifecycle logs + log-level CLI |
+| 7 (Concurrent Workers) | 2/2 | ✅ Complete | Concurrent slots, graceful drain, drain-timeout escalation |
 
 *Updated after each plan completion*
 
@@ -54,6 +55,11 @@ Progress: [█████░░░░░] 50% (v1.1) — 5 completed plans acro
 
 Recent decisions affecting v1.1 work:
 
+- [Phase 7]: Serialize claim start with `createMutex()` while awaiting `runWorkerIteration()` outside the critical section
+- [Phase 7]: Worker defaults remain `--concurrency 1` and `--drain-timeout-ms 30000` for backward compatibility
+- [Phase 7]: Drain timeout escalation reuses process-group semantics from Phase 5 by tracking in-flight child PIDs in `adapter-worker.ts`
+- [Phase 7]: `workerId` is propagated into delivery child logs instead of introducing separate worker lifecycle NDJSON events
+- [Phase 7]: Verbose output is delivery-scoped and now prints actual `agentId` prefixes instead of a static `"agent"` label
 - [Phase 6]: `import pino from "pino"` resolves correctly in ESM mode; verified by `npm run typecheck` and `test/daemon/logger.test.ts`
 - [Phase 6]: Daemon logger emits NDJSON with a `timestamp` field and delivery-scoped child bindings (`deliveryId`, `agentId`, `runId`)
 - [Phase 6]: Worker command always creates a daemon logger; `--log-level` defaults to `info` and writes structured logs to stderr
@@ -80,6 +86,6 @@ Recent decisions affecting v1.1 work:
 
 ## Session Continuity
 
-Last session: 2026-03-15T09:43:49.729Z
-Stopped at: Phase 7 context gathered
-Next: Plan Phase 7 (Concurrent Workers)
+Last session: 2026-03-15T10:38:58Z
+Stopped at: Phase 7 complete and verified
+Next: Plan Phase 8 (Embedded MCP Server)

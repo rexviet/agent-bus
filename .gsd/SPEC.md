@@ -1,4 +1,4 @@
-<!-- AUTO-GENERATED from .planning/PROJECT.md by scripts/sync-planning-to-gsd.mjs. Edit the source file, not this projection. -->
+<!-- AUTO-GENERATED from .planning/PROJECT.md by scripts/sync-planning-to-gsd.mjs. source-sha256: 2fe93f83d33de2b8c51d10ece135967935926c0f15169cf45b483f3d8a50285f. Edit the source file, not this projection. -->
 > **Status**: `FINALIZED`
 
 # Agent Bus

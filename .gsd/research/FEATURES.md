@@ -1,4 +1,4 @@
-<!-- AUTO-GENERATED from .planning/research/FEATURES.md by scripts/sync-planning-to-gsd.mjs. Edit the source file, not this projection. -->
+<!-- AUTO-GENERATED from .planning/research/FEATURES.md by scripts/sync-planning-to-gsd.mjs. source-sha256: ed939a36d68f8c3c611e575c31ec8d4364c1e3eeac2abd9032000fc217375105. Edit the source file, not this projection. -->
 
 # Feature Landscape
 
