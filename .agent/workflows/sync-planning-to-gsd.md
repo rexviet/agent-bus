@@ -91,6 +91,7 @@ Typical sequence:
 1. Plan/research in `.planning/`
 2. Run `/sync-planning-to-gsd`
 3. Execute in `.gsd/`
+4. Run `/handoff-execution {N}` when execution results should become canonical in `.planning/`
 
 </process>
 

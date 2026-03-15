@@ -13,18 +13,20 @@ This repository uses a dual-workspace model.
 - `.planning/` is the planning and research source of truth used by Claude Code
 - `.gsd/` is the execution projection used by Antigravity and Codex
 - Planning changes move from `.planning/` into `.gsd/` through the sync workflow documented in `.planning/README.md`
+- Verified execution changes move back into `.planning/` through the execution handoff workflow
 
 ---
 
 ## Core Protocol
 
-**PLAN/RESEARCH → SYNC → EXECUTE → VERIFY → COMMIT**
+**PLAN/RESEARCH → SYNC → EXECUTE → VERIFY → HANDOFF → COMMIT**
 
 1. **PLAN/RESEARCH**: Define requirements and phase plans in `.planning/`
 2. **SYNC**: Project the planning docs into `.gsd/` for execution agents
 3. **EXECUTE**: Implement from `.gsd/` with atomic commits per task
 4. **VERIFY**: Prove completion with empirical evidence
-5. **COMMIT**: One task = one commit, message format: `type(scope): description`
+5. **HANDOFF**: Persist execution summaries, verification, roadmap, and state back into `.planning/`
+6. **COMMIT**: One task = one commit, message format: `type(scope): description`
 
 **Planning Lock**: No implementation code until the relevant `.planning/` docs exist and have been synced into `.gsd/`.
 

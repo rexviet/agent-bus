@@ -52,15 +52,16 @@ Also summarize:
 
 ---
 
-## 4. Check Projection Freshness
+## 4. Check Workspace Drift
 
-Determine the `.gsd/` sync status:
+Determine the relationship between `.planning/` and `.gsd/`:
 
-- If `.gsd/STATE.md` or `.gsd/ROADMAP.md` is missing: projection missing
-- If `.planning/STATE.md` or `.planning/ROADMAP.md` is newer than the `.gsd/` counterpart: projection stale
-- If timestamps and content look aligned: projection current
+- If `.gsd/STATE.md` or `.gsd/ROADMAP.md` is missing: execution projection missing
+- If `.planning/STATE.md` or `.planning/ROADMAP.md` is newer than the `.gsd/` counterpart: forward sync required
+- If `.gsd/STATE.md` or `.gsd/ROADMAP.md` is newer than the `.planning/` counterpart because execution advanced: execution handoff pending
+- If timestamps and content look aligned: workspaces current
 
-If stale, recommend `/sync-planning-to-gsd` before any execution workflow.
+If execution is ahead, recommend `/handoff-execution {N}` before trusting `.planning/` progress as canonical.
 
 ---
 
@@ -92,7 +93,7 @@ Progress: {completed}/{total} phases ({percentage}%)
 
 EXECUTION PROJECTION (.gsd)
 
-Sync status: {current | stale | missing}
+Sync status: {current | forward-sync-required | handoff-pending | missing}
 Execution phase: {phase from .gsd/STATE.md, if present}
 Execution note: {short note from .gsd/STATE.md, if useful}
 
@@ -121,6 +122,7 @@ Recommend exactly one next step based on the strongest condition:
 | Condition | Recommendation |
 |-----------|----------------|
 | Planning changed and `.gsd/` is stale | `/sync-planning-to-gsd [phase]` |
+| Execution finished and `.planning/` has not been updated yet | `/handoff-execution {N}` |
 | Phase needs research | `/research-phase {N}` |
 | Phase needs plans | `/plan {N}` |
 | Phase is planned and synced | `/execute {N}` |

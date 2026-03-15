@@ -6,6 +6,7 @@ This repository uses a dual-workspace model.
 - `.gsd/` is the Antigravity/Codex execution workspace.
 
 Use `.planning/` as the source of truth for planning. When planning changes are ready for execution, project them into `.gsd/` with `/sync-planning-to-gsd` or `node scripts/sync-planning-to-gsd.mjs`.
+When execution results need to become canonical again, hand them back from `.gsd/` with `/handoff-execution <phase>` or `node scripts/handoff-execution-to-planning.mjs <phase>`.
 
 ## `.planning/` Scope
 

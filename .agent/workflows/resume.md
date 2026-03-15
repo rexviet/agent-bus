@@ -40,9 +40,11 @@ Compare `.planning/` against `.gsd/`:
 
 - If `.gsd/` is missing: execution workspace not synced yet
 - If `.planning/STATE.md` or `.planning/ROADMAP.md` is newer: `.gsd/` is stale
+- If `.gsd/STATE.md` or `.gsd/ROADMAP.md` is newer because execution advanced: canonical planning handoff is pending
 - If they match closely: execution workspace is ready
 
 If stale, the next step is usually `/sync-planning-to-gsd` before `/execute`.
+If execution is ahead, the next step is usually `/handoff-execution {N}` before trusting `.planning/` as current.
 
 ---
 
@@ -120,6 +122,7 @@ Recommend the single best next command:
 - `/research-phase {N}` — if the phase still needs discovery
 - `/plan {N}` — if planning is the current task
 - `/sync-planning-to-gsd {N}` — if `.planning/` changed after the last sync
+- `/handoff-execution {N}` — if `.gsd/` contains newer execution results than `.planning/`
 - `/execute {N}` — if the phase is planned and synced
 - `/verify {N}` — if implementation is done and proof is next
 - `/quick {id-or-slug}` — if the active work is a standalone quick task

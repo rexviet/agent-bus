@@ -156,7 +156,7 @@ All requirements satisfied.
 
 ▶ Next Up
 
-/execute {N+1} — proceed to next phase
+/handoff-execution {N} — persist verified execution state into `.planning/`
 
 ───────────────────────────────────────────────────────
 ```

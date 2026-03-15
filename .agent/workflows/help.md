@@ -37,6 +37,7 @@ CORE WORKFLOW
 /sync-planning-to-gsd [N]  Project `.planning/` into `.gsd/`
 /execute [N]      Wave-based execution with atomic commits
 /verify [N]       Must-haves validation with proof
+/handoff-execution [N]  Persist `.gsd/` execution results back into `.planning/`
 /debug [desc]     Systematic debugging (3-strike rule)
 
 PROJECT SETUP
@@ -78,6 +79,7 @@ QUICK START
 3. /sync-planning-to-gsd 1  → Project the plan into `.gsd/`
 4. /execute 1               → Implement from `.gsd/`
 5. /verify 1                → Confirm it works
+6. /handoff-execution 1     → Make the result canonical in `.planning/`
 
 ───────────────────────────────────────────────────────
 
