@@ -3,6 +3,11 @@ import * as path from "node:path";
 import type { ProcessMonitorCallbacks } from "../adapters/process-runner.js";
 import { startDaemon } from "../daemon/index.js";
 import type { AdapterWorkerExecutionResult } from "../daemon/adapter-worker.js";
+import {
+  createDaemonLogger,
+  type DaemonLogDestination,
+  type DaemonLogLevel
+} from "../daemon/logger.js";
 import type { WritableTextStream } from "./output.js";
 import {
   writeAgentCompletedText,
@@ -21,8 +26,16 @@ export interface WorkerCommandIO {
 }
 
 const WORKER_HELP_TEXT = `Worker command:
-  agent-bus worker [--config path] [--worker-id id] [--lease-duration-ms N] [--poll-interval-ms N] [--retry-delay-ms N] [--once] [--verbose]
+  agent-bus worker [--config path] [--worker-id id] [--lease-duration-ms N] [--poll-interval-ms N] [--retry-delay-ms N] [--log-level level] [--once] [--verbose]
 `;
+
+const VALID_LOG_LEVELS = new Set<DaemonLogLevel>([
+  "debug",
+  "info",
+  "warn",
+  "error",
+  "fatal"
+]);
 
 function hasFlag(args: readonly string[], flag: string): boolean {
   return args.includes(flag);
@@ -122,7 +135,8 @@ export async function runWorkerCommand(
     "--worker-id",
     "--lease-duration-ms",
     "--poll-interval-ms",
-    "--retry-delay-ms"
+    "--retry-delay-ms",
+    "--log-level"
   ]);
   const flagsWithoutValues = new Set(["--once", "--verbose"]);
 
@@ -168,6 +182,7 @@ export async function runWorkerCommand(
   let leaseDurationMs: number;
   let pollIntervalMs: number;
   let retryDelayMs: number | undefined;
+  let logLevel: DaemonLogLevel;
 
   try {
     leaseDurationMs =
@@ -188,6 +203,17 @@ export async function runWorkerCommand(
         "--retry-delay-ms",
         0
       ) ?? undefined;
+    const rawLogLevel = readOptionValue(args, "--log-level") ?? "info";
+
+    if (!VALID_LOG_LEVELS.has(rawLogLevel as DaemonLogLevel)) {
+      writeError(
+        io.stderr,
+        `Invalid --log-level "${rawLogLevel}". Valid: debug, info, warn, error, fatal`
+      );
+      return 1;
+    }
+
+    logLevel = rawLogLevel as DaemonLogLevel;
   } catch (error) {
     writeError(io.stderr, error instanceof Error ? error.message : "Invalid worker command.");
     return 1;
@@ -236,10 +262,13 @@ export async function runWorkerCommand(
     };
   }
 
+  const logger = createDaemonLogger(logLevel, io.stderr as DaemonLogDestination);
+
   const daemon = await startDaemon({
     configPath: path.resolve(io.cwd, configPath),
     repositoryRoot: io.cwd,
     registerSignalHandlers: false,
+    logger,
     ...(monitor ? { monitor } : {})
   });
   const stopController = createStopController();

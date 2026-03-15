@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Production Hardening
 status: executing
-stopped_at: Plan 05-03 complete (Foundation Safety phase complete, all TIMEOUT requirements met)
-last_updated: "2026-03-14T09:59:17.566Z"
-last_activity: 2026-03-14 — Plan 05-03 complete (per-delivery monitor from agent.timeout)
+stopped_at: Phase 6 complete and verified
+last_updated: "2026-03-15T04:33:05Z"
+last_activity: 2026-03-15 — Phase 6 complete (structured lifecycle logging via pino)
 progress:
   total_phases: 4
-  completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
-  percent: 25
+  completed_phases: 2
+  total_plans: 5
+  completed_plans: 5
+  percent: 50
 ---
 
 # Project State
@@ -21,29 +21,30 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-14)
 
 **Core value:** Event-driven multi-agent orchestration with durable delivery and human-in-the-loop approval
-**Current focus:** Phase 5 — Foundation Safety (ready to plan)
+**Current focus:** Phase 7 — Concurrent Workers (planning required)
 
 ## Current Position
 
-Phase: 5 of 8 in v1.1 (Foundation Safety)
-Plan: 3 of 3 (05-03 complete) — Per-delivery timeout wiring from manifest
-Status: In progress
-Last activity: 2026-03-14 — Plan 05-03 complete (per-delivery monitor from agent.timeout)
+Phase: 6 of 8 in v1.1 (Structured Logging)
+Plan: 2 of 2 complete — NDJSON lifecycle logging + worker log-level CLI
+Status: Complete and verified
+Last activity: 2026-03-15 — Phase 6 complete (structured lifecycle logging via pino)
 
-Progress: [███░░░░░░░] 25% (v1.1) — 3 of 12 plans complete
+Progress: [█████░░░░░] 50% (v1.1) — 5 completed plans across phases 5-6
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3 (v1.1)
-- Average duration: 18 min (52 total / 3 plans)
-- Total execution time: 52 min
+- Total plans completed: 5 (v1.1)
+- Average duration: 11 min (56 total / 5 plans)
+- Total execution time: 56 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 5 (Foundation Safety) | 3/3 | 52 min | 17 min |
+| 6 (Structured Logging) | 2/2 | 4 min | 2 min |
 
 *Updated after each plan completion*
 
@@ -53,6 +54,9 @@ Progress: [███░░░░░░░] 25% (v1.1) — 3 of 12 plans complete
 
 Recent decisions affecting v1.1 work:
 
+- [Phase 6]: `import pino from "pino"` resolves correctly in ESM mode; verified by `npm run typecheck` and `test/daemon/logger.test.ts`
+- [Phase 6]: Daemon logger emits NDJSON with a `timestamp` field and delivery-scoped child bindings (`deliveryId`, `agentId`, `runId`)
+- [Phase 6]: Worker command always creates a daemon logger; `--log-level` defaults to `info` and writes structured logs to stderr
 - [Plan 05-03]: Per-delivery monitor constructed inside runIteration; preserves global callbacks; agent.timeout converted to ms
 - [Plan 05-03]: Timeout signal exits routed through deliveryService.fail() (existing retry mechanism); no special dead-letter logic needed
 - [Plan 05-02]: SIGKILL grace period fixed at 5000ms (SIGKILL_GRACE_MS constant, non-configurable in v1.1)
@@ -67,7 +71,6 @@ Recent decisions affecting v1.1 work:
 ### Blockers/Concerns
 
 - [Phase 8]: `StreamableHTTPServerTransport` import path must be verified against `@modelcontextprotocol/sdk` installed version before planning Phase 8
-- [Phase 6]: Confirm `import pino from 'pino'` resolves correctly with `"type": "module"` before implementation
 
 ### Quick Tasks Completed
 
@@ -77,6 +80,6 @@ Recent decisions affecting v1.1 work:
 
 ## Session Continuity
 
-Last session: 2026-03-14T10:00:15Z
-Stopped at: Plan 05-03 complete (Foundation Safety phase complete, all TIMEOUT requirements met)
-Next: Phase 6 (Logging harness — daemon structured logging with pino, CLI integration)
+Last session: 2026-03-15T04:33:05Z
+Stopped at: Phase 6 complete and verified
+Next: Plan Phase 7 (Concurrent Workers)

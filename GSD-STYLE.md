@@ -4,6 +4,8 @@
 
 This document explains how GSD is written so future AI instances can contribute consistently.
 
+Repository note: this project uses a dual-workspace model. `.planning/` is the planning source workspace, and `.gsd/` is the execution projection workspace. See `.planning/README.md`.
+
 ## Core Philosophy
 
 GSD is a **meta-prompting system** where every file is both implementation and specification. Files teach the AI how to build software systematically. The system optimizes for:
@@ -30,13 +32,17 @@ Specialized agent behaviors. Each skill:
 - Contains detailed methodology
 - Is referenced by parent workflows
 
-### Templates (`.gsd/templates/*.md`)
+### Active Planning Docs (`.planning/**/*.md`)
 
-Reusable document structures. Copy, don't reference.
+The working planning documents for this repository live under `.planning/`.
 
-### References (`.gsd/examples/*.md`)
+### Legacy Templates (`.gsd/templates/*.md`)
 
-Read-only documentation and examples.
+Legacy reusable document structures. Copy only when a migration task explicitly targets the old GSD layout.
+
+### Legacy References (`.gsd/examples/*.md`)
+
+Read-only historical documentation and examples.
 
 ---
 
@@ -147,8 +153,8 @@ When spawning subprocesses (plans, tasks), they get:
 
 ### State Preservation
 
-STATE.md exists because context windows are temporary.
-Everything important goes in STATE.md so the next session can continue.
+`.planning/STATE.md` exists because context windows are temporary.
+Everything important goes in `.planning/STATE.md` so the next session can continue.
 
 ---
 

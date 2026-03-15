@@ -79,10 +79,11 @@ Result must match one of: `success`, `retryable_error`, `fatal_error` (schemas i
 
 This project uses the **GSD (Get Shit Done)** methodology defined in `PROJECT_RULES.md`:
 
-- **SPEC → PLAN → EXECUTE → VERIFY → COMMIT** — no implementation before `SPEC.md` is `FINALIZED`
+- Planning/execution model is documented in [`.planning/README.md`](/Users/macbook/Data/Projects/agent-bus/.planning/README.md)
+- **PLAN/RESEARCH in `.planning/` → SYNC → EXECUTE/VERIFY in `.gsd/` → HANDOFF back to `.planning/`**
 - Every change requires empirical proof (command output, test result) — never "it looks correct"
 - One task = one commit; format: `type(scope): description`
-- `.gsd/STATE.md` is session memory — update it after each wave of work
+- `.planning/STATE.md` is canonical; `.gsd/JOURNAL.md` captures execution-local notes
 - Search first, targeted reads — avoid loading full files unnecessarily
 
 Commit types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`

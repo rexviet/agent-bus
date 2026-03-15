@@ -5,6 +5,8 @@ description: Creates executable phase plans with task breakdown, dependency anal
 
 # GSD Planner Agent
 
+Repository override: this project uses a dual-workspace model. Planning lives in `.planning/`, and execution lives in `.gsd/` after sync. Use `.planning/README.md` for the mapping contract.
+
 <role>
 You are a GSD planner. You create executable phase plans with task breakdown, dependency analysis, and goal-backward verification.
 

@@ -6,17 +6,29 @@
 
 ---
 
+## Repository-Local Planning Structure
+
+This repository uses a dual-workspace model.
+
+- `.planning/` is the planning and research source of truth used by Claude Code
+- `.gsd/` is the execution projection used by Antigravity and Codex
+- Planning changes move from `.planning/` into `.gsd/` through the sync workflow documented in `.planning/README.md`
+- Verified execution changes move back into `.planning/` through the execution handoff workflow
+
+---
+
 ## Core Protocol
 
-**SPEC → PLAN → EXECUTE → VERIFY → COMMIT**
+**PLAN/RESEARCH → SYNC → EXECUTE → VERIFY → HANDOFF → COMMIT**
 
-1. **SPEC**: Define requirements in `.gsd/SPEC.md` until status is `FINALIZED`
-2. **PLAN**: Decompose into phases in `.gsd/ROADMAP.md`, then detailed plans
-3. **EXECUTE**: Implement with atomic commits per task
+1. **PLAN/RESEARCH**: Define requirements and phase plans in `.planning/`
+2. **SYNC**: Project the planning docs into `.gsd/` for execution agents
+3. **EXECUTE**: Implement from `.gsd/` with atomic commits per task
 4. **VERIFY**: Prove completion with empirical evidence
-5. **COMMIT**: One task = one commit, message format: `type(scope): description`
+5. **HANDOFF**: Persist execution summaries, verification, roadmap, and state back into `.planning/`
+6. **COMMIT**: One task = one commit, message format: `type(scope): description`
 
-**Planning Lock**: No implementation code until SPEC.md contains "Status: FINALIZED".
+**Planning Lock**: No implementation code until the relevant `.planning/` docs exist and have been synced into `.gsd/`.
 
 ---
 
@@ -165,12 +177,16 @@ GSD-STYLE.md              # Style and conventions
 └── skills/               # Agent specializations
 
 .gemini/                  # Gemini-specific configuration
-.gsd/                     # Project state and artifacts
-├── SPEC.md               # Requirements (must be FINALIZED)
+.planning/                # Planning + research source workspace
+├── PROJECT.md            # Project definition and scope
+├── REQUIREMENTS.md       # Requirement tracking
 ├── ROADMAP.md            # Phases and progress
 ├── STATE.md              # Session memory
-├── templates/            # Document templates
-└── examples/             # Usage examples
+├── phases/               # Phase-specific plans and summaries
+├── research/             # Shared architecture / stack research
+└── todos/                # Pending and completed todos
+
+.gsd/                     # Execution projection for Antigravity/Codex
 
 adapters/                 # Optional model-specific enhancements
 docs/                     # Operational documentation
@@ -194,7 +210,8 @@ scripts/                  # Utility scripts
 - Keep plans under 50% context usage
 - Fresh context for each plan execution
 - After 3 debugging failures → state dump → fresh session
-- STATE.md = memory across sessions
+- `.planning/STATE.md` = planning memory across sessions
+- `.gsd/STATE.md` = execution memory across sessions
 
 ---
 
@@ -244,9 +261,9 @@ After understanding a file:
 ## Quick Reference
 
 ```
-Before coding    → SPEC.md must be FINALIZED
+Before coding    → `.planning/` docs must be ready and synced into `.gsd/`
 Before file read → Search first, then targeted read
-After each task  → Commit + update STATE.md
+After each task  → Commit + update the active track's `STATE.md`
 After each wave  → State snapshot
 After 3 failures → State dump + fresh session
 Before "Done"    → Empirical proof captured

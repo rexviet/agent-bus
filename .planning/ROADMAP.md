@@ -46,7 +46,11 @@ Plans:
   1. Daemon writes NDJSON-formatted log lines to stderr for every delivery lifecycle event (claim, start, complete, retry, dead-letter)
   2. Every log line includes `deliveryId`, `agentId`, `runId`, `level`, and `timestamp` fields
   3. Operator can pipe daemon stderr to `jq` or `grep` and filter to a single delivery or agent with a one-liner
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [x] 06-01-PLAN.md — Install pino, create logger factory, thread through daemon, emit lifecycle log calls ✓ COMPLETE
+- [x] 06-02-PLAN.md — Wire --log-level CLI flag and verify NDJSON stderr output ✓ COMPLETE
 
 ### Phase 7: Concurrent Workers
 **Goal**: Operators can run multiple deliveries in parallel and the daemon drains cleanly on shutdown
@@ -76,6 +80,6 @@ Plans:
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 5. Foundation Safety | v1.1 | 3/3 | ✅ COMPLETE | 2026-03-14 |
-| 6. Structured Logging | v1.1 | 0/? | Not started | - |
+| 6. Structured Logging | v1.1 | 2/2 | ✅ COMPLETE | 2026-03-15 |
 | 7. Concurrent Workers | v1.1 | 0/? | Not started | - |
 | 8. Embedded MCP Server | v1.1 | 0/? | Not started | - |

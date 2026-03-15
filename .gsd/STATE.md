@@ -1,63 +1,87 @@
-# STATE.md
+---
+gsd_state_version: 1.0
+milestone: v1.1
+milestone_name: Production Hardening
+status: executing
+stopped_at: Phase 6 complete and verified
+last_updated: "2026-03-15T04:33:05Z"
+last_activity: 2026-03-15 — Phase 6 complete (structured lifecycle logging via pino)
+progress:
+  total_phases: 4
+  completed_phases: 2
+  total_plans: 5
+  completed_plans: 5
+  percent: 50
+---
+<!-- AUTO-GENERATED from .planning/STATE.md by scripts/sync-planning-to-gsd.mjs. Edit the source file, not this projection. -->
 
-> **Current Phase**: Milestone Planning
-> **Current Focus**: Drafting `v1.1` to extract backend abstraction boundaries while keeping the SQLite local-first runtime as the stable default
-> **Last Updated**: 2026-03-13
+
+# Project State
+
+## Project Reference
+
+See: .gsd/SPEC.md (updated 2026-03-14)
+
+**Core value:** Event-driven multi-agent orchestration with durable delivery and human-in-the-loop approval
+**Current focus:** Phase 7 — Concurrent Workers (planning required)
 
 ## Current Position
-- **Milestone**: v1.1
-- **Phase**: Not started
-- **Task**: Milestone drafted; Phase 1 planning pending
-- **Status**: Milestone planned (drafted 2026-03-10 17:12 +07)
 
-## Active Work
-- `v1.0` remains complete and is the baseline behavior to preserve.
-- `v1.1` is drafted as an architecture milestone for backend abstraction, not a distributed-backend implementation milestone.
-- The current branch `feature/gemini-runtime-adapter` replaces the unstable Antigravity runtime path with Gemini CLI while keeping the local SQLite workflow and operator demo intact.
+Phase: 6 of 8 in v1.1 (Structured Logging)
+Plan: 2 of 2 complete — NDJSON lifecycle logging + worker log-level CLI
+Status: Complete and verified
+Last activity: 2026-03-15 — Phase 6 complete (structured lifecycle logging via pino)
 
-## Last Session Summary
-The repository finished `v1.0` with operator workflow and README work already merged on `main`. This session starts the next milestone definition, focused on separating workflow semantics from storage and dispatch implementation details so future backends can be added without destabilizing the current SQLite runtime.
+Progress: [█████░░░░░] 50% (v1.1) — 5 completed plans across phases 5-6
 
-## In-Progress Work
-No `v1.1` implementation has started yet.
-- Branch: `feature/gemini-runtime-adapter`
-- Milestone status: drafted only
-- Runtime status: built-in QA runtime support now targets Gemini CLI instead of Antigravity for local v1 testing stability
-- Tests status: current verification is `npm test` with `66/66` passing tests plus manifest validation for `agent-bus.example.yaml`, `agent-bus.yaml`, and `examples/operator-demo/agent-bus.demo.yaml`
-- Local workspace note: additional docs-only demo prompt files exist under `examples/operator-demo/agents-demo/`
+## Performance Metrics
 
-## Blockers
-No active implementation blocker.
+**Velocity:**
+- Total plans completed: 5 (v1.1)
+- Average duration: 11 min (56 total / 5 plans)
+- Total execution time: 56 min
 
-## Context Dump
-Critical context that would be lost:
+**By Phase:**
 
-### Decisions Made
-- `v1.1` is about abstraction boundaries, not shipping a Node server, API layer, MCP surface, or Kafka-backed runtime yet.
-- SQLite and the local daemon remain required working defaults throughout this milestone.
-- The manifest, envelope schema, CLI semantics, operator demo, and repository-local artifact model must remain stable while the internals are refactored.
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| 5 (Foundation Safety) | 3/3 | 52 min | 17 min |
+| 6 (Structured Logging) | 2/2 | 4 min | 2 min |
 
-### Approaches Tried
-- Grounded the milestone in the existing SPEC constraints for one-machine, one-repository, local-first execution.
-- Derived the milestone phases from the architecture discussion: backend contracts first, then SQLite extraction, then dispatch isolation, then conformance coverage, then future-backend documentation.
+*Updated after each plan completion*
 
-### Current Hypothesis
-The safest path to future multi-backend support is to separate domain workflow semantics from backend mechanics before introducing any distributed control plane. If the contracts and conformance suite are solid, a later server or broker backend can be added without redesigning the protocol.
+## Accumulated Context
 
-### Files of Interest
-- `.gsd/SPEC.md`: current product constraints and non-goals
-- `.gsd/ROADMAP.md`: drafted `v1.1` milestone and phase breakdown
-- `src/daemon/`: orchestration, approval, replay, dispatch, and worker logic that currently mixes domain and backend concerns
-- `src/storage/`: SQLite-specific repositories that will need contract extraction
-- `src/cli/`: operator surface that must remain compatible throughout the refactor
+### Decisions
 
-## Next Steps
-1. Review and refine the drafted `v1.1` scope and phase order.
-2. Run `/plan 1` to research and break down Phase 1 backend contracts.
-3. Start `v1.1` implementation on a fresh branch once the milestone draft is accepted.
+Recent decisions affecting v1.1 work:
 
-## Notes
-- Project initialized through `/new-project`.
-- The repository baseline remains Node `22.12.0+`; run `nvm use v22.12.0` before any `npm` command.
-- `v1.0` remains the reference behavior; do not regress the deterministic operator demo or the current CLI workflow while extracting abstractions.
-- Future backends should preserve the repository-authored manifest and event-envelope contract rather than redefining the workflow model.
+- [Phase 6]: `import pino from "pino"` resolves correctly in ESM mode; verified by `npm run typecheck` and `test/daemon/logger.test.ts`
+- [Phase 6]: Daemon logger emits NDJSON with a `timestamp` field and delivery-scoped child bindings (`deliveryId`, `agentId`, `runId`)
+- [Phase 6]: Worker command always creates a daemon logger; `--log-level` defaults to `info` and writes structured logs to stderr
+- [Plan 05-03]: Per-delivery monitor constructed inside runIteration; preserves global callbacks; agent.timeout converted to ms
+- [Plan 05-03]: Timeout signal exits routed through deliveryService.fail() (existing retry mechanism); no special dead-letter logic needed
+- [Plan 05-02]: SIGKILL grace period fixed at 5000ms (SIGKILL_GRACE_MS constant, non-configurable in v1.1)
+- [Plan 05-02]: Process spawning uses `detached: true` without `unref()` for process group management
+- [Plan 05-02]: Result file unconditionally deleted after SIGKILL via `rm(resultFilePath, { force: true })`
+- [Plan 05-01]: Timeout field optional in manifest for backward-compatibility; stored as seconds (conversion to ms in adapter-worker)
+- [Pre-v1.1]: Use `pino ^9.0.0` for structured daemon logging (verify ESM import before Phase 6 implementation)
+- [Pre-v1.1]: MCP server must use HTTP localhost transport (not stdio) to avoid corrupting daemon output streams
+- [Pre-v1.1]: Process group kill (`-pid`) required for timeout — SIGTERM to direct child does not reach grandchildren
+- [Pre-v1.1]: Lease duration must exceed `timeoutMs + graceMs` — enforce at daemon startup to prevent double-execution
+
+### Blockers/Concerns
+
+- [Phase 8]: `StreamableHTTPServerTransport` import path must be verified against `@modelcontextprotocol/sdk` installed version before planning Phase 8
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 1 | Implement agent monitoring system for spawned adapter processes | 2026-03-13 | aaf01ec | [1-implement-agent-monitoring-system-for-sp](./quick/1-implement-agent-monitoring-system-for-sp/) |
+
+## Session Continuity
+
+Last session: 2026-03-15T04:33:05Z
+Stopped at: Phase 6 complete and verified
+Next: Run `/handoff-execution 6`, then plan Phase 7 (Concurrent Workers)

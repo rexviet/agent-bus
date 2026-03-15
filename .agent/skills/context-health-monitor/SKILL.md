@@ -5,6 +5,8 @@ description: Monitors context complexity and triggers state dumps before quality
 
 # Context Health Monitor
 
+Repository override: this project uses a dual-workspace model. Planning lives in `.planning/`, and execution lives in `.gsd/` after sync. Use `.planning/README.md` for the mapping contract.
+
 ## Purpose
 
 Prevent "Context Rot" — the quality degradation that occurs as the agent processes more information in a single session.

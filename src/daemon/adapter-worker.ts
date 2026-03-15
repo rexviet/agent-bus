@@ -23,6 +23,7 @@ import {
   persistPublishedEvent
 } from "./publish-event.js";
 import { planSubscriptionsForTopic } from "./subscription-planner.js";
+import type { DaemonLogger } from "./logger.js";
 import type {
   ReturnTypeOfCreateDeliveryStore,
   ReturnTypeOfCreateEventStore,
@@ -84,6 +85,7 @@ export interface AdapterWorkerOptions {
   readonly dispatcher: Dispatcher;
   readonly defaultRetryDelayMs?: number;
   readonly monitor?: ProcessMonitorCallbacks;
+  readonly logger?: DaemonLogger;
 }
 
 function sanitizePathSegment(value: string): string {
@@ -342,6 +344,7 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
         logFilePath: runPaths.logFilePath
       };
       const leaseToken = claimedDelivery.leaseToken;
+      let deliveryLogger: DaemonLogger | undefined;
 
       if (!leaseToken) {
         throw new Error(
@@ -355,6 +358,13 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
         if (!event) {
           throw new Error(`Persisted event not found for delivery ${claimedDelivery.deliveryId}.`);
         }
+
+        deliveryLogger = options.logger?.child({
+          deliveryId: claimedDelivery.deliveryId,
+          agentId: claimedDelivery.agentId,
+          runId: event.runId
+        });
+        deliveryLogger?.info({ event: "delivery.claimed" });
 
         const agent = getManifestAgent(options.manifest, claimedDelivery.agentId);
 
@@ -395,6 +405,8 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
           workPackage
         });
 
+        deliveryLogger?.info({ event: "agent.started" });
+
         const processResult = await runPreparedAdapterCommand({
           materializedRun,
           execution: buildAdapterCommand({
@@ -412,8 +424,10 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
             processResult.exitCode === 0 && processResult.signal === null
               ? `Adapter command for ${agent.id} exited without writing a result envelope.`
               : `Adapter command for ${agent.id} exited with code ${processResult.exitCode ?? "null"}${processResult.signal ? ` signal ${processResult.signal}` : ""}.`;
+          const shouldDeadLetter =
+            processResult.exitCode === 0 && processResult.signal === null;
 
-          return finalizeLeaseBoundTransition({
+          const result = finalizeLeaseBoundTransition({
             deliveryStore: options.deliveryStore,
             deliveryId: claimedDelivery.deliveryId,
             leaseToken,
@@ -424,7 +438,7 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
             },
             transitionStatus: "process_error",
             transition: () =>
-              processResult.exitCode === 0 && processResult.signal === null
+              shouldDeadLetter
                 ? options.deliveryService.deadLetter({
                     deliveryId: claimedDelivery.deliveryId,
                     leaseToken,
@@ -437,12 +451,26 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
                     retryDelayMs: input.retryDelayMs ?? defaultRetryDelayMs
                   })
           });
+
+          if (result.delivery.status === "dead_letter") {
+            deliveryLogger?.error({
+              event: "delivery.dead_lettered",
+              errorMessage
+            });
+          } else if (result.delivery.status === "retry_scheduled") {
+            deliveryLogger?.info({
+              event: "delivery.retry_scheduled",
+              errorMessage
+            });
+          }
+
+          return result;
         }
 
         const adapterResult = processResult.result;
 
         if (adapterResult.status === "retryable_error") {
-          return finalizeLeaseBoundTransition({
+          const result = finalizeLeaseBoundTransition({
             deliveryStore: options.deliveryStore,
             deliveryId: claimedDelivery.deliveryId,
             leaseToken,
@@ -460,10 +488,19 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
                 retryDelayMs: adapterResult.retryDelayMs
               })
           });
+
+          if (result.delivery.status === "retry_scheduled") {
+            deliveryLogger?.info({
+              event: "delivery.retry_scheduled",
+              errorMessage: adapterResult.errorMessage
+            });
+          }
+
+          return result;
         }
 
         if (adapterResult.status === "fatal_error") {
-          return finalizeLeaseBoundTransition({
+          const result = finalizeLeaseBoundTransition({
             deliveryStore: options.deliveryStore,
             deliveryId: claimedDelivery.deliveryId,
             leaseToken,
@@ -480,9 +517,18 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
                 errorMessage: adapterResult.errorMessage
               })
           });
+
+          if (result.delivery.status === "dead_letter") {
+            deliveryLogger?.error({
+              event: "delivery.dead_lettered",
+              errorMessage: adapterResult.errorMessage
+            });
+          }
+
+          return result;
         }
 
-        return publishEmittedEventsAndAcknowledge(
+        const result = publishEmittedEventsAndAcknowledge(
           {
             database: options.database,
             manifest: options.manifest,
@@ -506,6 +552,10 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
             logFilePath: processResult.logFilePath
           }
         );
+
+        deliveryLogger?.info({ event: "delivery.completed" });
+
+        return result;
       } catch (error) {
         const staleLeaseDelivery = currentDeliveryLostLease(
           options.deliveryStore,
@@ -523,15 +573,16 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
 
         const errorMessage =
           error instanceof Error ? error.message : "Unknown adapter worker failure.";
+        const shouldDeadLetter = isFatalSetupError(error);
 
-        return finalizeLeaseBoundTransition({
+        const result = finalizeLeaseBoundTransition({
           deliveryStore: options.deliveryStore,
           deliveryId: claimedDelivery.deliveryId,
           leaseToken,
           resultPaths,
           transitionStatus: "process_error",
           transition: () =>
-            isFatalSetupError(error)
+            shouldDeadLetter
               ? options.deliveryService.deadLetter({
                   deliveryId: claimedDelivery.deliveryId,
                   leaseToken,
@@ -544,6 +595,20 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
                   retryDelayMs: input.retryDelayMs ?? defaultRetryDelayMs
                 })
         });
+
+        if (result.delivery.status === "dead_letter") {
+          deliveryLogger?.error({
+            event: "delivery.dead_lettered",
+            errorMessage
+          });
+        } else if (result.delivery.status === "retry_scheduled") {
+          deliveryLogger?.info({
+            event: "delivery.retry_scheduled",
+            errorMessage
+          });
+        }
+
+        return result;
       }
     }
   };

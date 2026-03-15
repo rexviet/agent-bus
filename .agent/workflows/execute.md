@@ -52,7 +52,7 @@ test -f ".gsd/ROADMAP.md"
 test -f ".gsd/STATE.md"
 ```
 
-**If not found:** Error — user should run `/plan` first.
+**If not found:** Error — user should sync planning into `.gsd/` first.
 
 ---
 
@@ -80,14 +80,15 @@ grep "Phase $PHASE:" ".gsd/ROADMAP.md"
 ```powershell
 $PHASE_DIR = ".gsd/phases/$PHASE"
 if (-not (Test-Path $PHASE_DIR)) {
-    New-Item -ItemType Directory -Path $PHASE_DIR
+    Write-Error "Phase directory $PHASE_DIR not found. Run /sync-planning-to-gsd first."
+    exit
 }
 ```
 
 **Bash:**
 ```bash
 PHASE_DIR=".gsd/phases/$PHASE"
-mkdir -p "$PHASE_DIR"
+[ -d "$PHASE_DIR" ] || { echo "Error: phase directory $PHASE_DIR not found. Run /sync-planning-to-gsd first." >&2; exit 1; }
 ```
 
 ---
