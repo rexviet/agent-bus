@@ -8,7 +8,9 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "node:test";
 
 import { main } from "../../src/cli.js";
+import { runWorkerCommand } from "../../src/cli/worker-command.js";
 import { createAdapterWorker } from "../../src/daemon/adapter-worker.js";
+import type { AdapterWorkerExecutionResult } from "../../src/daemon/adapter-worker.js";
 import { startDaemon } from "../../src/daemon/index.js";
 import type { DaemonLogger } from "../../src/daemon/logger.js";
 import { parseEventEnvelope } from "../../src/domain/event-envelope.js";
@@ -475,6 +477,92 @@ test("worker defaults log level to info when --log-level is omitted", async () =
     assert.ok(logLines.length >= 3, `expected info-level logs by default, got: ${result.stderr}`);
     assert.ok(logLines.every((line) => line.level >= 30));
   });
+});
+
+test("worker keeps other slots running when one slot iteration fails", async () => {
+  const stdout = createCaptureStream();
+  const stderr = createCaptureStream();
+  const seenWorkerIds: string[] = [];
+  let stopCalls = 0;
+  let successfulDeliveryProcessed = false;
+
+  const successResult: AdapterWorkerExecutionResult = {
+    status: "success",
+    delivery: {
+      deliveryId: "delivery-success-001",
+      eventId: "event-success-001",
+      agentId: "fixture_worker",
+      topic: "plan_done",
+      status: "completed",
+      availableAt: "2026-03-15T12:00:00Z",
+      attemptCount: 1,
+      maxAttempts: 3,
+      replayCount: 0,
+      createdAt: "2026-03-15T12:00:00Z",
+      updatedAt: "2026-03-15T12:00:01Z",
+      leaseToken: "lease-token-success"
+    },
+    workPackagePath: "/tmp/work-package.json",
+    resultFilePath: "/tmp/result.json",
+    logFilePath: "/tmp/log.txt",
+    emittedEvents: []
+  };
+
+  const exitCode = await runWorkerCommand(
+    ["--worker-id", "worker-isolation", "--concurrency", "2", "--poll-interval-ms", "1"],
+    {
+      cwd: process.cwd(),
+      stdout: stdout.stream,
+      stderr: stderr.stream
+    },
+    {
+      createDaemonLogger: () =>
+        ({
+          warn() {
+            // no-op
+          }
+        }) as unknown as DaemonLogger,
+      startDaemon: async () =>
+        ({
+          runWorkerIteration(workerId: string) {
+            seenWorkerIds.push(workerId);
+
+            if (workerId.endsWith("/0")) {
+              return Promise.reject(new Error("slot failed"));
+            }
+
+            if (!successfulDeliveryProcessed) {
+              successfulDeliveryProcessed = true;
+              return new Promise<AdapterWorkerExecutionResult>((resolve) => {
+                setTimeout(() => {
+                  process.emit("SIGTERM", "SIGTERM");
+                  resolve(successResult);
+                }, 10);
+              });
+            }
+
+            return Promise.resolve(null);
+          },
+          getInFlightDeliveryCount() {
+            return 0;
+          },
+          forceKillInFlight() {
+            // no-op
+          },
+          async stop() {
+            stopCalls += 1;
+          }
+        }) as never
+    }
+  );
+
+  assert.equal(exitCode, 1);
+  assert.equal(stopCalls, 1);
+  assert.ok(seenWorkerIds.some((workerId) => workerId.endsWith("/0")));
+  assert.ok(seenWorkerIds.some((workerId) => workerId.endsWith("/1")));
+  assert.match(stdout.read(), /Worker result worker-isolation\/1/);
+  assert.match(stdout.read(), /reason: signal SIGTERM/);
+  assert.match(stderr.read(), /worker-isolation\/0: slot failed/);
 });
 
 test("worker runs deliveries concurrently when --concurrency is greater than one", async () => {
