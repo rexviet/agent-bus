@@ -1,4 +1,4 @@
-<!-- AUTO-GENERATED from .planning/research/PITFALLS.md by scripts/sync-planning-to-gsd.mjs. Edit the source file, not this projection. -->
+<!-- AUTO-GENERATED from .planning/research/PITFALLS.md by scripts/sync-planning-to-gsd.mjs. source-sha256: c85c14fb6e6ed388a0fef9a85e497f900c83975ddd235b814751b4df44fb28a0. Edit the source file, not this projection. -->
 
 # Domain Pitfalls
 

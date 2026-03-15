@@ -26,8 +26,13 @@ export interface WorkerCommandIO {
 }
 
 const WORKER_HELP_TEXT = `Worker command:
-  agent-bus worker [--config path] [--worker-id id] [--lease-duration-ms N] [--poll-interval-ms N] [--retry-delay-ms N] [--log-level level] [--once] [--verbose]
+  agent-bus worker [--config path] [--worker-id id] [--lease-duration-ms N] [--poll-interval-ms N] [--retry-delay-ms N] [--concurrency N] [--drain-timeout-ms N] [--log-level level] [--once] [--verbose]
 `;
+
+interface RunWorkerCommandDependencies {
+  readonly startDaemon?: typeof startDaemon;
+  readonly createDaemonLogger?: typeof createDaemonLogger;
+}
 
 const VALID_LOG_LEVELS = new Set<DaemonLogLevel>([
   "debug",
@@ -82,6 +87,24 @@ function sleep(milliseconds: number): Promise<void> {
   });
 }
 
+export function createMutex(): {
+  run<T>(fn: () => Promise<T> | T): Promise<T>;
+} {
+  let chain: Promise<void> = Promise.resolve();
+
+  return {
+    run<T>(fn: () => Promise<T> | T): Promise<T> {
+      const result = chain.then(fn);
+      chain = result.then(
+        () => undefined,
+        () => undefined
+      );
+
+      return result;
+    }
+  };
+}
+
 function createStopController() {
   let stopRequested = false;
   let reason = "requested";
@@ -126,16 +149,63 @@ function registerWorkerSignalHandlers(stopController: ReturnType<typeof createSt
   };
 }
 
+export function createVerboseMonitorFactory(
+  stream: WritableTextStream
+): (agentId: string) => ProcessMonitorCallbacks {
+  return (agentId: string): ProcessMonitorCallbacks => {
+    const makeLineBuffer = (source: "stdout" | "stderr") => {
+      let buffer = "";
+
+      return (chunk: Buffer): void => {
+        buffer += chunk.toString();
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          writeAgentOutputLine(stream, agentId, source, line);
+        }
+      };
+    };
+
+    return {
+      onStdout: makeLineBuffer("stdout"),
+      onStderr: makeLineBuffer("stderr"),
+      onStart: (info) => {
+        writeAgentStartedText(stream, {
+          agentId,
+          pid: info.pid,
+          command: info.command
+        });
+      },
+      onComplete: (info) => {
+        writeAgentCompletedText(stream, {
+          agentId,
+          pid: info.pid,
+          exitCode: info.exitCode,
+          signal: info.signal,
+          elapsedMs: info.elapsedMs
+        });
+      }
+    };
+  };
+}
+
 export async function runWorkerCommand(
   args: readonly string[],
-  io: WorkerCommandIO
+  io: WorkerCommandIO,
+  dependencies: RunWorkerCommandDependencies = {}
 ): Promise<number> {
+  const startDaemonImpl = dependencies.startDaemon ?? startDaemon;
+  const createDaemonLoggerImpl =
+    dependencies.createDaemonLogger ?? createDaemonLogger;
   const optionsWithValues = new Set([
     "--config",
     "--worker-id",
     "--lease-duration-ms",
     "--poll-interval-ms",
     "--retry-delay-ms",
+    "--concurrency",
+    "--drain-timeout-ms",
     "--log-level"
   ]);
   const flagsWithoutValues = new Set(["--once", "--verbose"]);
@@ -182,6 +252,8 @@ export async function runWorkerCommand(
   let leaseDurationMs: number;
   let pollIntervalMs: number;
   let retryDelayMs: number | undefined;
+  let concurrency: number;
+  let drainTimeoutMs: number;
   let logLevel: DaemonLogLevel;
 
   try {
@@ -203,6 +275,18 @@ export async function runWorkerCommand(
         "--retry-delay-ms",
         0
       ) ?? undefined;
+    concurrency =
+      parseIntegerAtLeast(
+        readOptionValue(args, "--concurrency"),
+        "--concurrency",
+        1
+      ) ?? 1;
+    drainTimeoutMs =
+      parseIntegerAtLeast(
+        readOptionValue(args, "--drain-timeout-ms"),
+        "--drain-timeout-ms",
+        0
+      ) ?? 30_000;
     const rawLogLevel = readOptionValue(args, "--log-level") ?? "info";
 
     if (!VALID_LOG_LEVELS.has(rawLogLevel as DaemonLogLevel)) {
@@ -219,111 +303,163 @@ export async function runWorkerCommand(
     return 1;
   }
 
-  // When --verbose is set, build monitor callbacks that stream agent output to terminal.
-  // Uses a static label "agent" since the agentId is per-delivery and known only at runtime.
-  let monitor: ProcessMonitorCallbacks | undefined;
-
-  if (verbose) {
-    // Line buffer to avoid splitting multi-byte or mid-line chunks.
-    const makeLineBuffer = (source: "stdout" | "stderr") => {
-      let buffer = "";
-
-      return (chunk: Buffer): void => {
-        buffer += chunk.toString();
-        const lines = buffer.split("\n");
-        // All but last element are complete lines.
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          writeAgentOutputLine(io.stdout, "agent", source, line);
-        }
-      };
-    };
-
-    monitor = {
-      onStdout: makeLineBuffer("stdout"),
-      onStderr: makeLineBuffer("stderr"),
-      onStart: (info) => {
-        writeAgentStartedText(io.stdout, {
-          agentId: "agent",
-          pid: info.pid,
-          command: info.command
-        });
-      },
-      onComplete: (info) => {
-        writeAgentCompletedText(io.stdout, {
-          agentId: "agent",
-          pid: info.pid,
-          exitCode: info.exitCode,
-          signal: info.signal,
-          elapsedMs: info.elapsedMs
-        });
-      }
-    };
-  }
-
-  const logger = createDaemonLogger(logLevel, io.stderr as DaemonLogDestination);
-
-  const daemon = await startDaemon({
+  const verboseMonitorFactory = verbose ? createVerboseMonitorFactory(io.stdout) : undefined;
+  const logger = createDaemonLoggerImpl(logLevel, io.stderr as DaemonLogDestination);
+  const daemon = await startDaemonImpl({
     configPath: path.resolve(io.cwd, configPath),
     repositoryRoot: io.cwd,
     registerSignalHandlers: false,
     logger,
-    ...(monitor ? { monitor } : {})
+    ...(verboseMonitorFactory ? { verboseMonitorFactory } : {})
   });
   const stopController = createStopController();
   const unregisterSignals = registerWorkerSignalHandlers(stopController);
+  const claimMutex = createMutex();
   let idlePolls = 0;
   let processedDeliveries = 0;
+  let drainedDeliveries = 0;
+  let encounteredError = false;
+  let inFlightIterations = 0;
 
   writeWorkerStartedText(io.stdout, {
     workerId,
     configPath,
     pollIntervalMs,
     leaseDurationMs,
+    concurrency,
+    drainTimeoutMs,
     ...(retryDelayMs !== undefined ? { retryDelayMs } : {}),
     once
   });
 
   try {
-    while (!stopController.requested) {
-      let result: AdapterWorkerExecutionResult | null;
+    const waitForNextPoll = () =>
+      Promise.race([sleep(pollIntervalMs), stopController.waitForStop()]);
+    const slotCount = once ? 1 : concurrency;
+    type IterationStart =
+      | { readonly started: false }
+      | {
+          readonly started: true;
+          readonly promise: Promise<AdapterWorkerExecutionResult | null>;
+        };
 
-      try {
-        result = await daemon.runWorkerIteration(workerId, leaseDurationMs, retryDelayMs);
-      } catch (error) {
-        writeError(
-          io.stderr,
-          error instanceof Error ? error.message : "Worker iteration failed."
-        );
-        return 1;
-      }
+    async function runSlot(slotIndex: number): Promise<void> {
+      const slotWorkerId = `${workerId}/${slotIndex}`;
 
-      if (result) {
-        idlePolls = 0;
-        processedDeliveries += 1;
-        writeWorkerExecutionText(io.stdout, workerId, result);
+      while (!stopController.requested) {
+        const iterationStart = await claimMutex.run<IterationStart>(() => {
+          if (stopController.requested || inFlightIterations >= concurrency) {
+            return { started: false };
+          }
+
+          inFlightIterations += 1;
+
+          return {
+            started: true,
+            promise: daemon.runWorkerIteration(slotWorkerId, leaseDurationMs, retryDelayMs)
+          };
+        });
+
+        if (!iterationStart.started) {
+          await waitForNextPoll();
+          continue;
+        }
+
+        let result: AdapterWorkerExecutionResult | null;
+
+        try {
+          result = await iterationStart.promise;
+        } catch (error) {
+          encounteredError = true;
+          writeError(
+            io.stderr,
+            error instanceof Error ? error.message : "Worker iteration failed."
+          );
+          stopController.request("iteration failed");
+          break;
+        } finally {
+          inFlightIterations -= 1;
+        }
+
+        if (result) {
+          idlePolls = 0;
+          processedDeliveries += 1;
+          writeWorkerExecutionText(io.stdout, slotWorkerId, result);
+
+          if (once) {
+            stopController.request("once");
+            break;
+          }
+
+          continue;
+        }
+
+        idlePolls += 1;
 
         if (once) {
           stopController.request("once");
+          writeWorkerIdleText(io.stdout, workerId);
           break;
         }
 
-        continue;
+        await waitForNextPoll();
       }
-
-      idlePolls += 1;
-
-      if (once) {
-        stopController.request("once");
-        writeWorkerIdleText(io.stdout, workerId);
-        break;
-      }
-
-      await Promise.race([sleep(pollIntervalMs), stopController.waitForStop()]);
     }
 
-    return 0;
+    const slotPromises = Array.from({ length: slotCount }, (_, index) => runSlot(index));
+    const slotsSettled = Promise.allSettled(slotPromises);
+    const drainWatcher = stopController.waitForStop().then(async () => {
+      drainedDeliveries = daemon.getInFlightDeliveryCount();
+
+      if (drainedDeliveries === 0) {
+        return;
+      }
+
+      const drainTimedOut = await new Promise<boolean>((resolve) => {
+        let resolved = false;
+        const timeoutHandle = setTimeout(() => {
+          if (resolved) {
+            return;
+          }
+
+          resolved = true;
+          resolve(true);
+        }, drainTimeoutMs);
+
+        slotsSettled.then(() => {
+          if (resolved) {
+            return;
+          }
+
+          resolved = true;
+          clearTimeout(timeoutHandle);
+          resolve(false);
+        });
+      });
+
+      if (!drainTimedOut) {
+        return;
+      }
+
+      const remainingDeliveries = daemon.getInFlightDeliveryCount();
+
+      if (remainingDeliveries === 0) {
+        return;
+      }
+
+      logger.warn({
+        event: "drain.timeout",
+        workerId,
+        inFlightCount: remainingDeliveries,
+        drainTimeoutMs
+      });
+      daemon.forceKillInFlight();
+    });
+
+    await slotsSettled;
+    await drainWatcher;
+
+    return encounteredError ? 1 : 0;
   } finally {
     stopController.request(stopController.reason);
     unregisterSignals();
@@ -331,6 +467,7 @@ export async function runWorkerCommand(
     writeWorkerStoppedText(io.stdout, {
       workerId,
       processedDeliveries,
+      drainedDeliveries,
       idlePolls,
       reason: stopController.reason
     });

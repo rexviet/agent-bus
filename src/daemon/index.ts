@@ -43,6 +43,7 @@ export interface StartDaemonOptions {
   readonly registerSignalHandlers?: boolean;
   readonly databasePath?: string;
   readonly monitor?: ProcessMonitorCallbacks;
+  readonly verboseMonitorFactory?: (agentId: string) => ProcessMonitorCallbacks;
   readonly logger?: DaemonLogger;
 }
 
@@ -114,6 +115,8 @@ export interface AgentBusDaemon {
     leaseDurationMs: number,
     retryDelayMs?: number
   ): Promise<AdapterWorkerExecutionResult | null>;
+  getInFlightDeliveryCount(): number;
+  forceKillInFlight(): void;
   stop(): Promise<void>;
 }
 
@@ -178,7 +181,10 @@ export async function startDaemon(
     deliveryService,
     dispatcher,
     ...(options.logger ? { logger: options.logger } : {}),
-    ...(options.monitor ? { monitor: options.monitor } : {})
+    ...(options.monitor ? { monitor: options.monitor } : {}),
+    ...(options.verboseMonitorFactory
+      ? { verboseMonitorFactory: options.verboseMonitorFactory }
+      : {})
   };
   const adapterWorker = createAdapterWorker(adapterWorkerOptions);
   const replayService = createReplayService({
@@ -344,6 +350,14 @@ export async function startDaemon(
         leaseDurationMs,
         ...(retryDelayMs !== undefined ? { retryDelayMs } : {})
       });
+    },
+
+    getInFlightDeliveryCount() {
+      return adapterWorker.getInFlightDeliveryCount();
+    },
+
+    forceKillInFlight() {
+      adapterWorker.forceKillInFlight();
     },
 
     async stop() {

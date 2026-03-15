@@ -1,4 +1,4 @@
-<!-- AUTO-GENERATED from .planning/research/SUMMARY.md by scripts/sync-planning-to-gsd.mjs. Edit the source file, not this projection. -->
+<!-- AUTO-GENERATED from .planning/research/SUMMARY.md by scripts/sync-planning-to-gsd.mjs. source-sha256: 96565c63ead894bcce2ea0025eacec80ccceb46dd2c7616c07c1a7dccaad9eb2. Edit the source file, not this projection. -->
 
 # Project Research Summary
 

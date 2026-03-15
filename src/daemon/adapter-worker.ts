@@ -1,6 +1,7 @@
 import * as path from "node:path";
 
 import type { DatabaseSync } from "node:sqlite";
+import type { Buffer } from "node:buffer";
 
 import {
   createAdapterWorkPackage,
@@ -85,7 +86,65 @@ export interface AdapterWorkerOptions {
   readonly dispatcher: Dispatcher;
   readonly defaultRetryDelayMs?: number;
   readonly monitor?: ProcessMonitorCallbacks;
+  readonly verboseMonitorFactory?: (agentId: string) => ProcessMonitorCallbacks;
   readonly logger?: DaemonLogger;
+}
+
+function mergeProcessMonitors(
+  ...monitors: ReadonlyArray<ProcessMonitorCallbacks | undefined>
+): ProcessMonitorCallbacks | undefined {
+  const activeMonitors = monitors.filter(
+    (monitor): monitor is ProcessMonitorCallbacks => monitor !== undefined
+  );
+  const timeoutMs = activeMonitors.findLast(
+    (monitor) => monitor.timeoutMs !== undefined
+  )?.timeoutMs;
+
+  if (activeMonitors.length === 0) {
+    return undefined;
+  }
+
+  const mergedCallbacks = {
+    onStdout: (chunk: Buffer) => {
+      for (const monitor of activeMonitors) {
+        monitor.onStdout?.(chunk);
+      }
+    },
+    onStderr: (chunk: Buffer) => {
+      for (const monitor of activeMonitors) {
+        monitor.onStderr?.(chunk);
+      }
+    },
+    onStart: (info: { pid: number; command: string; startedAt: Date }) => {
+      for (const monitor of activeMonitors) {
+        monitor.onStart?.(info);
+      }
+    },
+    onComplete: (info: {
+      pid: number;
+      exitCode: number | null;
+      signal: NodeJS.Signals | null;
+      elapsedMs: number;
+    }) => {
+      for (const monitor of activeMonitors) {
+        monitor.onComplete?.(info);
+      }
+    }
+  };
+
+  return timeoutMs !== undefined
+    ? {
+        ...mergedCallbacks,
+        timeoutMs
+      }
+    : mergedCallbacks;
+}
+
+function extractLeaseConflictDeliveryId(error: unknown): string | null {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(/^Failed to claim delivery ([^.\s]+)\.?$/);
+
+  return match?.[1] ?? null;
 }
 
 function sanitizePathSegment(value: string): string {
@@ -322,20 +381,76 @@ function publishEmittedEventsAndAcknowledge(
 
 export function createAdapterWorker(options: AdapterWorkerOptions) {
   const defaultRetryDelayMs = options.defaultRetryDelayMs ?? 30_000;
+  const inFlightPids = new Set<number>();
+  const inFlightDeliveryIds = new Set<string>();
+  let sigKillHandle: ReturnType<typeof setTimeout> | undefined;
 
   return {
+    forceKillInFlight(): void {
+      for (const pid of inFlightPids) {
+        try {
+          process.kill(-pid, "SIGTERM");
+        } catch {
+          // Process may have already exited.
+        }
+      }
+
+      if (sigKillHandle !== undefined) {
+        return;
+      }
+
+      sigKillHandle = setTimeout(() => {
+        sigKillHandle = undefined;
+
+        for (const pid of inFlightPids) {
+          try {
+            process.kill(-pid, "SIGKILL");
+          } catch {
+            // Process may have already exited.
+          }
+        }
+      }, 5_000);
+      sigKillHandle.unref?.();
+    },
+
+    getInFlightDeliveryCount(): number {
+      return inFlightDeliveryIds.size;
+    },
+
     async runIteration(
       input: RunWorkerIterationInput
     ): Promise<AdapterWorkerExecutionResult | null> {
-      const claimedDelivery = options.deliveryService.claim({
-        workerId: input.workerId,
-        leaseDurationMs: input.leaseDurationMs,
-        ...(input.asOf ? { asOf: input.asOf } : {})
-      });
+      let claimedDelivery: PersistedDeliveryRecord | null;
+
+      try {
+        claimedDelivery = options.deliveryService.claim({
+          workerId: input.workerId,
+          leaseDurationMs: input.leaseDurationMs,
+          ...(input.asOf ? { asOf: input.asOf } : {})
+        });
+      } catch (error) {
+        const conflictedDeliveryId = extractLeaseConflictDeliveryId(error);
+
+        if (conflictedDeliveryId) {
+          options.logger?.warn(
+            {
+              event: "lease.conflict",
+              deliveryId: conflictedDeliveryId,
+              workerId: input.workerId
+            },
+            "Lease conflict detected for delivery"
+          );
+          return null;
+        }
+
+        throw error;
+      }
 
       if (!claimedDelivery) {
         return null;
       }
+
+      inFlightDeliveryIds.add(claimedDelivery.deliveryId);
 
       const runPaths = buildRunDirectory(options.layout, claimedDelivery);
       const resultPaths: WorkerResultPaths = {
@@ -362,16 +477,32 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
         deliveryLogger = options.logger?.child({
           deliveryId: claimedDelivery.deliveryId,
           agentId: claimedDelivery.agentId,
-          runId: event.runId
+          runId: event.runId,
+          workerId: input.workerId
         });
         deliveryLogger?.info({ event: "delivery.claimed" });
 
         const agent = getManifestAgent(options.manifest, claimedDelivery.agentId);
-
+        const verboseMonitor = options.verboseMonitorFactory?.(claimedDelivery.agentId);
+        const monitorBase = mergeProcessMonitors(options.monitor, verboseMonitor);
         const perDeliveryMonitor: ProcessMonitorCallbacks | undefined =
           agent.timeout !== undefined
-            ? { ...(options.monitor ?? {}), timeoutMs: agent.timeout * 1000 }
-            : options.monitor;
+            ? {
+                ...(monitorBase ?? {}),
+                timeoutMs: agent.timeout * 1000
+              }
+            : monitorBase;
+        const trackingMonitor: ProcessMonitorCallbacks = {
+          ...(perDeliveryMonitor ?? {}),
+          onStart: (info) => {
+            inFlightPids.add(info.pid);
+            perDeliveryMonitor?.onStart?.(info);
+          },
+          onComplete: (info) => {
+            inFlightPids.delete(info.pid);
+            perDeliveryMonitor?.onComplete?.(info);
+          }
+        };
 
         const requiredArtifacts = getRequiredArtifacts(
           options.manifest,
@@ -416,7 +547,7 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
             resultFilePath: materializedRun.resultFilePath,
             logFilePath: materializedRun.logFilePath
           }),
-          ...(perDeliveryMonitor ? { monitor: perDeliveryMonitor } : {})
+          monitor: trackingMonitor
         });
 
         if (!processResult.result) {
@@ -609,6 +740,8 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
         }
 
         return result;
+      } finally {
+        inFlightDeliveryIds.delete(claimedDelivery.deliveryId);
       }
     }
   };

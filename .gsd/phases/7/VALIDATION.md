@@ -6,6 +6,8 @@ nyquist_compliant: true
 wave_0_complete: true
 created: 2026-03-15
 ---
+<!-- AUTO-GENERATED from .planning/phases/07-concurrent-workers/07-VALIDATION.md by scripts/sync-planning-to-gsd.mjs. source-sha256: 8122c504dd249c31597714a3c53c5a6badd8fade2bd324009c409f76ec1e6ed9. Edit the source file, not this projection. -->
+
 
 # Phase 7 — Validation Strategy
 

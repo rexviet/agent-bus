@@ -1,4 +1,4 @@
-<!-- AUTO-GENERATED from .planning/ROADMAP.md by scripts/sync-planning-to-gsd.mjs. Edit the source file, not this projection. -->
+<!-- AUTO-GENERATED from .planning/ROADMAP.md by scripts/sync-planning-to-gsd.mjs. source-sha256: 51f6562a8ff4df3d9d7deac160f546361e79b70ffe2394936eabf9d382c1a90f. Edit the source file, not this projection. -->
 
 # Roadmap: Agent Bus
 
@@ -62,7 +62,11 @@ Plans:
   1. Operator starts daemon with `--concurrency N` and up to N agent processes run simultaneously
   2. Daemon started without `--concurrency` flag defaults to concurrency 1, preserving existing single-delivery behavior
   3. On receiving a stop signal, the daemon completes all in-flight deliveries before exiting — no deliveries are abandoned mid-execution
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [x] 07-01-PLAN.md — CLI flags, mutex utility, output extensions, per-delivery verbose/workerId wiring ✓ COMPLETE
+- [x] 07-02-PLAN.md — Concurrent slot-loop pool, drain logic, integration tests ✓ COMPLETE
 
 ### Phase 8: Embedded MCP Server
 **Goal**: Agents can publish follow-up events directly during execution by calling the MCP `publish_event` tool
@@ -83,5 +87,5 @@ Plans:
 |-------|-----------|----------------|--------|-----------|
 | 5. Foundation Safety | v1.1 | 3/3 | ✅ COMPLETE | 2026-03-14 |
 | 6. Structured Logging | v1.1 | 2/2 | ✅ COMPLETE | 2026-03-15 |
-| 7. Concurrent Workers | v1.1 | 0/? | Not started | - |
+| 7. Concurrent Workers | v1.1 | 2/2 | ✅ COMPLETE | 2026-03-15 |
 | 8. Embedded MCP Server | v1.1 | 0/? | Not started | - |

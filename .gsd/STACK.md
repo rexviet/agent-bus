@@ -1,4 +1,4 @@
-<!-- AUTO-GENERATED from .planning/research/STACK.md by scripts/sync-planning-to-gsd.mjs. Edit the source file, not this projection. -->
+<!-- AUTO-GENERATED from .planning/research/STACK.md by scripts/sync-planning-to-gsd.mjs. source-sha256: 98997e699eecc389970d91475afa48f4bfc2764098caff19c2d6a4552853dfe7. Edit the source file, not this projection. -->
 
 # Technology Stack
 

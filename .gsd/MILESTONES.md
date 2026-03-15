@@ -1,4 +1,4 @@
-<!-- AUTO-GENERATED from .planning/MILESTONES.md by scripts/sync-planning-to-gsd.mjs. Edit the source file, not this projection. -->
+<!-- AUTO-GENERATED from .planning/MILESTONES.md by scripts/sync-planning-to-gsd.mjs. source-sha256: d4673661a2a9403ba99452a68b658d8721b0018050015e2afad4fa01589c5e23. Edit the source file, not this projection. -->
 
 # Milestones
 

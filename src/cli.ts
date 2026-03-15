@@ -15,7 +15,7 @@ const HELP_TEXT = `agent-bus
 Usage:
   agent-bus --help
   agent-bus daemon [--config path] [--exit-after-ready]
-  agent-bus worker [--config path] [--worker-id id] [--lease-duration-ms N] [--poll-interval-ms N] [--retry-delay-ms N] [--log-level level] [--once]
+  agent-bus worker [--config path] [--worker-id id] [--lease-duration-ms N] [--poll-interval-ms N] [--retry-delay-ms N] [--concurrency N] [--drain-timeout-ms N] [--log-level level] [--once]
   agent-bus layout [--config path] [--ensure]
   agent-bus validate-manifest [path]
   agent-bus runs <subcommand>

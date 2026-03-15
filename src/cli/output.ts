@@ -256,6 +256,8 @@ export function writeWorkerStartedText(
     readonly configPath: string;
     readonly pollIntervalMs: number;
     readonly leaseDurationMs: number;
+    readonly concurrency: number;
+    readonly drainTimeoutMs: number;
     readonly retryDelayMs?: number;
     readonly once: boolean;
   }
@@ -265,6 +267,8 @@ export function writeWorkerStartedText(
   writeLine(stream, `mode: ${options.once ? "once" : "loop"}`);
   writeLine(stream, `pollIntervalMs: ${options.pollIntervalMs}`);
   writeLine(stream, `leaseDurationMs: ${options.leaseDurationMs}`);
+  writeLine(stream, `concurrency: ${options.concurrency}`);
+  writeLine(stream, `drainTimeoutMs: ${options.drainTimeoutMs}`);
 
   if (options.retryDelayMs !== undefined) {
     writeLine(stream, `retryDelayMs: ${options.retryDelayMs}`);
@@ -313,6 +317,7 @@ export function writeWorkerStoppedText(
   summary: {
     readonly workerId: string;
     readonly processedDeliveries: number;
+    readonly drainedDeliveries: number;
     readonly idlePolls: number;
     readonly reason: string;
   }
@@ -321,6 +326,7 @@ export function writeWorkerStoppedText(
   writeLine(stream, `Worker stopped ${summary.workerId}`);
   writeLine(stream, `reason: ${summary.reason}`);
   writeLine(stream, `processedDeliveries: ${summary.processedDeliveries}`);
+  writeLine(stream, `drainedDeliveries: ${summary.drainedDeliveries}`);
   writeLine(stream, `idlePolls: ${summary.idlePolls}`);
 }
 
@@ -331,7 +337,7 @@ export function writeAgentOutputLine(
   line: string
 ): void {
   // Indent under worker status so nested output is visually distinct.
-  stream.write(`  [${agentId}:${source}] ${line}\n`);
+  stream.write(`  [${agentId}] ${source} | ${line}\n`);
 }
 
 export function writeAgentStartedText(
