@@ -60,7 +60,11 @@ Plans:
   1. Operator starts daemon with `--concurrency N` and up to N agent processes run simultaneously
   2. Daemon started without `--concurrency` flag defaults to concurrency 1, preserving existing single-delivery behavior
   3. On receiving a stop signal, the daemon completes all in-flight deliveries before exiting — no deliveries are abandoned mid-execution
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 07-01-PLAN.md — CLI flags, mutex utility, output extensions, per-delivery verbose/workerId wiring
+- [ ] 07-02-PLAN.md — Concurrent slot-loop pool, drain logic, integration tests
 
 ### Phase 8: Embedded MCP Server
 **Goal**: Agents can publish follow-up events directly during execution by calling the MCP `publish_event` tool
@@ -81,5 +85,5 @@ Plans:
 |-------|-----------|----------------|--------|-----------|
 | 5. Foundation Safety | v1.1 | 3/3 | ✅ COMPLETE | 2026-03-14 |
 | 6. Structured Logging | v1.1 | 2/2 | ✅ COMPLETE | 2026-03-15 |
-| 7. Concurrent Workers | v1.1 | 0/? | Not started | - |
+| 7. Concurrent Workers | v1.1 | 0/2 | Not started | - |
 | 8. Embedded MCP Server | v1.1 | 0/? | Not started | - |
