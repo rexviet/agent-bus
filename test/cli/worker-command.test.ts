@@ -15,6 +15,15 @@ interface CapturedRun {
   readonly stderr: string;
 }
 
+interface ParsedDaemonLogLine {
+  readonly event?: string;
+  readonly level: number;
+  readonly timestamp: string;
+  readonly deliveryId: string;
+  readonly agentId: string;
+  readonly runId: string;
+}
+
 function createCaptureStream() {
   let output = "";
 
@@ -52,6 +61,14 @@ async function runCli(
 
 function fixtureAdapterPath(): string {
   return path.resolve(process.cwd(), "test/fixtures/adapters/success-adapter.mjs");
+}
+
+function parseDaemonLogLines(stderr: string): ParsedDaemonLogLine[] {
+  return stderr
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("{"))
+    .map((line) => JSON.parse(line) as ParsedDaemonLogLine);
 }
 
 async function withTempRepo(
@@ -201,11 +218,127 @@ test("worker validates numeric options and required option values", async () => 
       repositoryRoot
     );
     const missingWorkerId = await runCli(["worker", "--worker-id"], repositoryRoot);
+    const invalidLogLevel = await runCli(
+      ["worker", "--log-level", "bogus"],
+      repositoryRoot
+    );
+    const missingLogLevelValue = await runCli(
+      ["worker", "--log-level", "--once"],
+      repositoryRoot
+    );
 
     assert.equal(invalidLease.exitCode, 1);
     assert.match(invalidLease.stderr, /--lease-duration-ms must be an integer >= 1/);
 
     assert.equal(missingWorkerId.exitCode, 1);
     assert.match(missingWorkerId.stderr, /Worker option --worker-id requires a value/);
+
+    assert.equal(invalidLogLevel.exitCode, 1);
+    assert.match(
+      invalidLogLevel.stderr,
+      /Invalid --log-level "bogus"\. Valid: debug, info, warn, error, fatal/
+    );
+
+    assert.equal(missingLogLevelValue.exitCode, 1);
+    assert.match(missingLogLevelValue.stderr, /Worker option --log-level requires a value/);
+    assert.match(missingLogLevelValue.stderr, /--log-level level/);
+  });
+});
+
+test("worker emits parseable NDJSON lifecycle logs to stderr", async () => {
+  await withTempRepo(async (configPath, repositoryRoot) => {
+    const daemon = await startDaemon({
+      configPath,
+      repositoryRoot,
+      registerSignalHandlers: false,
+      recoveryIntervalMs: 5_000
+    });
+
+    try {
+      daemon.publish(
+        parseEventEnvelope({
+          eventId: "550e8400-e29b-41d4-a716-446655440802",
+          topic: "plan_done",
+          runId: "run-cli-worker-logs-001",
+          correlationId: "run-cli-worker-logs-001",
+          dedupeKey: "plan_done:run-cli-worker-logs-001",
+          occurredAt: "2026-03-11T02:05:00Z",
+          producer: {
+            agentId: "ba_codex",
+            runtime: "codex"
+          },
+          payload: {},
+          payloadMetadata: {},
+          artifactRefs: []
+        })
+      );
+    } finally {
+      await daemon.stop();
+    }
+
+    const result = await runCli(
+      ["worker", "--once", "--worker-id", "worker-cli-logs", "--log-level", "debug"],
+      repositoryRoot
+    );
+
+    assert.equal(result.exitCode, 0);
+
+    const logLines = parseDaemonLogLines(result.stderr);
+
+    assert.ok(logLines.length >= 3, `expected structured log lines, got: ${result.stderr}`);
+    assert.ok(logLines.some((line) => line.event === "delivery.claimed"));
+
+    for (const line of logLines) {
+      assert.equal(typeof line.level, "number");
+      assert.equal(typeof line.timestamp, "string");
+      assert.equal(typeof line.deliveryId, "string");
+      assert.equal(typeof line.agentId, "string");
+      assert.equal(typeof line.runId, "string");
+    }
+  });
+});
+
+test("worker defaults log level to info when --log-level is omitted", async () => {
+  await withTempRepo(async (configPath, repositoryRoot) => {
+    const daemon = await startDaemon({
+      configPath,
+      repositoryRoot,
+      registerSignalHandlers: false,
+      recoveryIntervalMs: 5_000
+    });
+
+    try {
+      daemon.publish(
+        parseEventEnvelope({
+          eventId: "550e8400-e29b-41d4-a716-446655440803",
+          topic: "plan_done",
+          runId: "run-cli-worker-logs-default-001",
+          correlationId: "run-cli-worker-logs-default-001",
+          dedupeKey: "plan_done:run-cli-worker-logs-default-001",
+          occurredAt: "2026-03-11T02:10:00Z",
+          producer: {
+            agentId: "ba_codex",
+            runtime: "codex"
+          },
+          payload: {},
+          payloadMetadata: {},
+          artifactRefs: []
+        })
+      );
+    } finally {
+      await daemon.stop();
+    }
+
+    const result = await runCli(
+      ["worker", "--once", "--worker-id", "worker-cli-default-log-level"],
+      repositoryRoot
+    );
+
+    assert.equal(result.exitCode, 0);
+
+    const logLines = parseDaemonLogLines(result.stderr);
+
+    assert.ok(logLines.length >= 3, `expected info-level logs by default, got: ${result.stderr}`);
+    assert.ok(logLines.every((line) => line.level >= 30));
   });
 });
