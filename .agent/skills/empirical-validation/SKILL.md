@@ -5,6 +5,8 @@ description: Requires proof before marking work complete — no "trust me, it wo
 
 # Empirical Validation
 
+Repository override: this project uses a dual-workspace model. Planning lives in `.planning/`, and execution lives in `.gsd/` after sync. Use `.planning/README.md` for the mapping contract.
+
 ## Core Principle
 
 > **"The code looks correct" is NOT validation.**

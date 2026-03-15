@@ -1,45 +1,52 @@
 ---
-description: List all pending todo items
-argument-hint: "[--all] [--priority high|medium|low]"
+description: List canonical todo notes from the planning workspace
+argument-hint: "[--all] [--area <name>]"
 ---
 
 # /check-todos Workflow
 
+Repository override: list todo items from `.planning/todos/`. `.gsd/TODO.md` is only a projection for execution-side visibility.
+
 <objective>
-Display pending todo items, optionally filtered by priority or status.
+Display pending todo notes, optionally including completed items or filtering by area.
 </objective>
 
 <context>
 **Flags:**
-- `--all` — Show completed items too
-- `--priority high|medium|low` — Filter by priority
+- `--all` — Show completed items from `.planning/todos/done/` too
+- `--area <name>` — Filter by the `area` frontmatter field
 
-**Input:**
-- `.gsd/TODO.md` — Todo items
+**Canonical inputs:**
+- `.planning/todos/pending/*.md`
+- `.planning/todos/done/*.md` when `--all` is used
 </context>
 
 <process>
 
-## 1. Load TODO.md
+## 1. Load Todo Files
 
-```powershell
-if (-not (Test-Path ".gsd/TODO.md")) {
-    Write-Output "No todos found. Use /add-todo to create one."
-    exit
-}
+Read:
+- all markdown files in `.planning/todos/pending/`
+- all markdown files in `.planning/todos/done/` if `--all` is present
 
-Get-Content ".gsd/TODO.md"
-```
+If none exist, display:
+`No todos found. Use /add-todo to capture one.`
 
 ---
 
 ## 2. Parse and Filter
 
-Count items by status:
-- `- [ ]` = pending
-- `- [x]` = complete
+For each todo file, extract:
+- `title`
+- `created`
+- `area`
+- file path
 
-Filter by priority if flag provided.
+Filter by `--area` if provided.
+
+Classify:
+- pending = file under `.planning/todos/pending/`
+- done = file under `.planning/todos/done/`
 
 ---
 
@@ -52,29 +59,19 @@ Filter by priority if flag provided.
 
 PENDING ({N} items)
 ───────────────────
-🔴 {high priority item}
-🟡 {medium priority item}
-🟢 {low priority item}
+- {title} `{area}` — {created} [{path}]
 
-{If --all flag:}
+{If --all:}
 COMPLETED ({M} items)
 ─────────────────────
-✅ {completed item}
+- {title} `{area}` — {created} [{path}]
 
 ───────────────────────────────────────────────────────
 
-/add-todo <item> — add new item
+/add-todo <title>
+/sync-planning-to-gsd --root-only   # refresh `.gsd/TODO.md` if needed
 
 ───────────────────────────────────────────────────────
 ```
 
 </process>
-
-<priority_indicators>
-| Priority | Indicator |
-|----------|-----------|
-| high | 🔴 |
-| medium | 🟡 |
-| low | 🟢 |
-| done | ✅ |
-</priority_indicators>

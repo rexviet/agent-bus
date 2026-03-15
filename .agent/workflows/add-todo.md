@@ -1,22 +1,25 @@
 ---
-description: Capture a todo item for later
-argument-hint: "<description> [--priority high|medium|low]"
+description: Capture a todo item as a canonical planning note
+argument-hint: "<title> [--area <name>] [--files <path[,path...]>]"
 ---
 
 # /add-todo Workflow
 
+Repository override: in this project, todos live in `.planning/todos/pending/` and `.planning/todos/done/`. `.gsd/TODO.md` is only a synced projection.
+
 <objective>
-Quickly capture an idea, task, or issue without interrupting current work flow.
+Capture a deferred task or idea without interrupting the current workflow.
 </objective>
 
 <context>
-**Item:** $ARGUMENTS (the todo description)
+**Item:** $ARGUMENTS
 
 **Flags:**
-- `--priority high|medium|low` — Set priority (default: medium)
+- `--area <name>` — Optional ownership / topic tag such as `daemon`, `cli`, `docs`, or `general`
+- `--files <path[,path...]>` — Optional related files to pre-link in the note
 
-**Output:**
-- `.gsd/TODO.md` — Accumulated todo items
+**Canonical output:**
+- `.planning/todos/pending/YYYY-MM-DD-slug.md`
 </context>
 
 <process>
@@ -24,28 +27,50 @@ Quickly capture an idea, task, or issue without interrupting current work flow.
 ## 1. Parse Arguments
 
 Extract:
-- Todo description
-- Priority (default: medium)
+- Title
+- Area (default: `general`)
+- Optional file list
+
+Use the title to create a filesystem-safe slug.
 
 ---
 
-## 2. Ensure TODO.md Exists
+## 2. Ensure Todo Directories Exist
 
-```powershell
-if (-not (Test-Path ".gsd/TODO.md")) {
-    # Create with header
-}
-```
+Confirm:
+- `.planning/todos/pending/`
+- `.planning/todos/done/`
+
+Create missing directories if needed.
 
 ---
 
-## 3. Add Todo Item
+## 3. Create the Todo File
 
-Append to `.gsd/TODO.md`:
+Create `.planning/todos/pending/{YYYY-MM-DD}-{slug}.md` with this structure:
 
 ```markdown
-- [ ] {description} `{priority}` — {date}
+---
+created: {ISO timestamp}
+title: {title}
+area: {area}
+files:
+  - {path1}
+  - {path2}
+---
+
+## Problem
+
+{Why this item matters}
+
+## Solution
+
+{What change is desired}
 ```
+
+If no related files were supplied, omit the `files` block.
+
+Keep the body short if the user only needs a quick capture.
 
 ---
 
@@ -53,15 +78,18 @@ Append to `.gsd/TODO.md`:
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► TODO ADDED ✓
+ GSD ► TODO ADDED
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{description}
-Priority: {priority}
+Saved:
+{new file path}
+
+Area: {area}
 
 ───────────────────────────────────────────────────────
 
-/check-todos — see all pending items
+/check-todos
+/sync-planning-to-gsd --root-only   # if `.gsd/TODO.md` needs refresh
 
 ───────────────────────────────────────────────────────
 ```

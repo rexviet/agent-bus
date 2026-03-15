@@ -1,296 +1,419 @@
-# ARCHITECTURE.md
+<!-- AUTO-GENERATED from .planning/research/ARCHITECTURE.md by scripts/sync-planning-to-gsd.mjs. Edit the source file, not this projection. -->
 
-> Mapped on: 2026-03-13
-> Baseline: current `v1.0` implementation, with `v1.1` extraction pressure points called out explicitly
+# Architecture Patterns
 
-## System Summary
+**Domain:** Local-first event-driven agent orchestration runtime (v1.1 Production Hardening)
+**Researched:** 2026-03-14
+**Confidence:** HIGH — based on direct codebase analysis
 
-`agent-bus` is a local-first orchestration runtime for multi-agent software workflows inside a single repository. The repository-authored manifest defines agents, topic subscriptions, approval-gated topics, and workspace roots. The runtime persists workflow state in SQLite, passes artifacts by repository-relative file paths, and executes agents as local subprocesses through a JSON work-package contract.
+---
 
-The implementation is intentionally narrow:
+## Current Architecture (v1.0 Baseline)
 
-- one repository
-- one machine
-- one SQLite database
-- CLI-first operations
-- no HTTP API, broker, or multi-node coordination
+The daemon is a single-process orchestrator. `startDaemon()` in `src/daemon/index.ts` is the composition root: it wires all stores, services, and the adapter worker together then returns an `AgentBusDaemon` facade.
 
-## Repository Shape
+```
+CLI entrypoint (src/cli.ts)
+  └── startDaemon() [src/daemon/index.ts]
+        ├── SQLite stores: EventStore, DeliveryStore, ApprovalStore, RunStore
+        ├── Dispatcher (in-memory notification log)
+        ├── ApprovalService
+        ├── DeliveryService
+        ├── AdapterWorker
+        │     └── process-runner (spawn, pipe stdout/stderr to log file)
+        ├── ReplayService
+        ├── OperatorService
+        └── RecoveryScan (setInterval)
+```
 
-| Path | Role |
-| --- | --- |
-| `src/cli.ts` | Primary CLI entry point and top-level command router |
-| `src/cli/` | Operator commands, worker loop command, envelope loading, text output formatting |
-| `src/config/` | YAML manifest loading, schema validation, relationship validation |
-| `src/domain/` | Event-envelope and artifact-path validation rules |
-| `src/daemon/` | Runtime composition, publish/fan-out, approvals, replay, recovery, worker coordination |
-| `src/storage/` | SQLite client, SQL migrations, repository-style stores for runs/events/deliveries/approvals |
-| `src/adapters/` | Adapter contract, runtime registry, process spawning, vendor-specific command shaping |
-| `src/shared/` | Repository-relative path and runtime-layout helpers |
-| `test/` | Unit, integration, and end-to-end coverage across stores, daemon, CLI, and adapter flows |
-| `examples/operator-demo/` | Deterministic demo manifest, envelopes, workspace artifacts, and reset script |
-| `bin/agent-bus` | Shell bootstrap that enforces Node `>=22.12.0` and runs `dist/cli.js` with `--experimental-sqlite` |
+The worker poll loop lives in `src/cli/worker-command.ts` and calls `daemon.runWorkerIteration()` sequentially — one delivery at a time per worker process.
 
-## Entry Points
+### Key Integration Points for v1.1
 
-### CLI
+| Feature | Existing Hook | Gap |
+|---------|--------------|-----|
+| Process timeouts | `ProcessMonitorCallbacks.timeoutMs` exists in `process-runner.ts` (line 44, 130-133) | Not wired into manifest or StartDaemon options — plumbing is there but the value is never passed |
+| Structured logging | Text output via `src/cli/output.ts` and raw file append in `process-runner.ts` | No structured (JSON) logger object; log calls are ad-hoc `stream.write()` |
+| Concurrent workers | Single sequential `runWorkerIteration()` loop per process | No pool — `worker-command.ts` awaits each iteration before starting the next |
+| Env isolation | `buildBaseEnvironment()` in `registry.ts` merges `agent.environment` with full `process.env` | `process.env` leak: all parent env vars passed to every spawned process |
+| MCP server | `AgentBusDaemon` facade exposes `publish()`, `claimDelivery()`, etc. | No HTTP or stdio transport layer; no MCP protocol handler |
 
-`src/cli.ts` exposes the full user-facing surface:
+---
 
-- `layout`
-- `validate-manifest`
-- `daemon`
-- `worker`
-- `runs`
-- `approvals`
-- `failures`
-- `replay`
-- `publish`
+## Recommended Architecture for v1.1
 
-The CLI is thin. It delegates most behavior to `startDaemon()` plus subcommand helpers in `src/cli/operator-command.ts` and `src/cli/worker-command.ts`.
+### Component Map: New vs Modified
 
-### Programmatic Composition Root
+```
+src/
+  adapters/
+    process-runner.ts          [MODIFY] — read timeoutMs from manifest agent config
+  config/
+    manifest-schema.ts         [MODIFY] — add timeoutMs, allowedEnvKeys to AgentSchema
+  daemon/
+    index.ts                   [MODIFY] — accept logger, wire timeoutMs, start MCP server
+    adapter-worker.ts          [MODIFY] — pass logger to process-runner callbacks
+    mcp-server.ts              [NEW]    — MCP protocol handler (stdio transport)
+    worker-pool.ts             [NEW]    — concurrent worker loop manager
+  shared/
+    logger.ts                  [NEW]    — structured logger factory (JSON, leveled)
+```
 
-`src/daemon/index.ts` is the real runtime assembly point. It:
+No new storage layer changes are required for any of these features. All five features plug into existing seams.
 
-1. loads the manifest
-2. resolves and creates runtime directories
-3. opens SQLite in WAL mode
-4. runs migrations
-5. constructs concrete stores
-6. wires approval, delivery, replay, operator, and worker services
-7. optionally starts recovery scanning
+---
 
-Architecturally, the "daemon" is an in-process facade rather than a separately modeled control plane. Operator commands create it transiently for each invocation. The worker command keeps it alive inside the polling loop.
+## Feature Integration Details
 
-## Core Runtime Flow
+### 1. Process Timeouts
 
-### 1. Manifest and Layout Resolution
+**Where the hook already exists:**
 
-`src/config/load-manifest.ts` parses YAML with `yaml` and validates it with `zod`. It also checks cross-record relationships such as:
+`ProcessMonitorCallbacks.timeoutMs?: number` is already read in `runPreparedAdapterCommand()` (line 130). When set, it calls `child.kill("SIGTERM")` after the timeout. The plumbing is complete.
 
-- no duplicate agent IDs
-- no duplicate `agentId/topic` subscriptions
-- no subscriptions targeting unknown agents
-- no duplicate approval-gate topics
+**What is missing:**
 
-`src/shared/runtime-layout.ts` resolves manifest-relative directories into:
+- `AgentSchema` in `manifest-schema.ts` does not have a `timeoutMs` field.
+- `buildAdapterCommand()` in `registry.ts` does not read any timeout value.
+- `adapter-worker.ts` does not pass `timeoutMs` into the `monitor` object it receives.
+- `StartDaemonOptions` has no `defaultTimeoutMs` field.
 
-- workspace directory
-- state directory
-- logs directory
-- derived internal directory
+**Integration pattern:**
 
-All workspace paths are forced to stay inside the repository root.
+```
+manifest: agent.timeoutMs (optional, per-agent override)
+  → AgentSchema adds: timeoutMs: z.number().int().positive().optional()
+  → adapter-worker.ts reads agent.timeoutMs at claim time
+  → passes monitor: { ...existingMonitor, timeoutMs: agent.timeoutMs ?? defaultTimeoutMs }
+  → process-runner.ts already handles it
+```
 
-### 2. Publish and Fan-Out
+**Signal behavior:** Current code sends SIGTERM. No SIGKILL follow-up exists. The child may ignore SIGTERM. For v1.1, a follow-up SIGKILL after a grace period (e.g., 5s) should be added inside `runPreparedAdapterCommand()` — this is a self-contained change to `process-runner.ts`.
 
-The publish path starts in `src/cli/operator-command.ts` and reaches `src/daemon/publish-event.ts`.
+**Delivery outcome on timeout:** The process exits with `signal: "SIGTERM"` (or null if it catches and ignores the signal). The existing error path in `adapter-worker.ts` (lines 405-433) already routes signal exits to `deliveryService.fail()` (retry). No new state machine transitions needed.
 
-`publishEvent()` does the following inside the SQLite-backed persistence layer:
+---
 
-1. creates a run if `runId` is new
-2. determines whether the topic is approval-gated
-3. persists the event
-4. persists event artifact references
-5. creates a pending approval row when required
-6. plans one delivery per subscribed agent
-7. emits dispatcher notifications for pending approvals or ready deliveries
+### 2. Structured Logging
 
-Routing is topic-based through `src/daemon/subscription-planner.ts`. Fan-out is deterministic and deduplicated per `eventId + agentId`.
+**Current state:** All output goes through `src/cli/output.ts` using plain `stream.write()` text. Agent process stdout/stderr is piped to a flat log file. No structured logger object exists anywhere in the codebase.
 
-### 3. Approval Flow
+**Recommended approach:** A minimal internal logger — not a third-party library — consistent with the zero-external-dependencies constraint (only `yaml` and `zod` are dependencies).
 
-Approvals are handled through `src/daemon/approval-service.ts`.
+**New file: `src/shared/logger.ts`**
 
-Approve path:
+```typescript
+export type LogLevel = "debug" | "info" | "warn" | "error";
 
-1. mark approval row as `approved`
-2. update the event approval status to `approved`
-3. transition event deliveries from `pending_approval` to `ready`
-4. touch the run
-5. emit ready-delivery notifications
+export interface Logger {
+  debug(msg: string, fields?: Record<string, unknown>): void;
+  info(msg: string, fields?: Record<string, unknown>): void;
+  warn(msg: string, fields?: Record<string, unknown>): void;
+  error(msg: string, fields?: Record<string, unknown>): void;
+  child(fields: Record<string, unknown>): Logger;
+}
+```
 
-Reject path:
+Output format: newline-delimited JSON (`{ "ts": "ISO", "level": "info", "msg": "...", ...fields }`). Written to `process.stderr` by default (so structured logs do not pollute stdout for CLI consumers).
 
-1. mark approval row as `rejected`
-2. update the event approval status to `rejected`
-3. transition event deliveries from `pending_approval` to `cancelled`
-4. touch the run
+**Integration points:**
 
-Both transitions run transactionally.
+- `startDaemon()` accepts an optional `logger?: Logger`. If not provided, uses a no-op logger. This preserves all existing tests.
+- `AdapterWorker` receives the logger and emits structured events: `delivery.claimed`, `delivery.completed`, `delivery.failed`, `process.started`, `process.completed`.
+- `RecoveryScan` logs `recovery.scan` with counts.
+- `MCP server` (new) uses the logger for connection events.
+- CLI `worker-command.ts` creates the logger when `--log-format json` is passed (new flag).
 
-### 4. Worker Execution Path
+**Do not replace `cli/output.ts` text output.** That is the operator-facing UX. Structured logging is for daemon internals — two separate concerns.
 
-`src/cli/worker-command.ts` runs the local polling loop. Each iteration calls `runWorkerIteration()` from `src/daemon/adapter-worker.ts`.
+---
 
-Worker flow:
+### 3. Concurrent Workers
 
-1. claim the next `ready` or `retry_scheduled` delivery
-2. load the source event and manifest agent record
-3. verify subscription-required artifacts exist on the event
-4. build a normalized adapter work package
-5. materialize an adapter-run directory under state plus a log file under logs
-6. build a subprocess command using vendor-specific logic or generic fallback
-7. spawn the child process
-8. read the result envelope from disk
-9. transition the delivery to `completed`, `retry_scheduled`, or `dead_letter`
-10. on success, publish follow-up events transactionally before acknowledging the delivery
+**Current state:** `worker-command.ts` runs a single `while` loop, sequentially `await`-ing each `daemon.runWorkerIteration()`. This means one delivery processes at a time per worker process.
 
-The work package is file-based by design. Agents never talk to SQLite directly.
+**New file: `src/daemon/worker-pool.ts`**
 
-### 5. Retry, Dead-Letter, Recovery, and Replay
+```typescript
+export interface WorkerPoolOptions {
+  readonly concurrency: number;         // Number of parallel slots
+  readonly workerId: string;
+  readonly leaseDurationMs: number;
+  readonly retryDelayMs?: number;
+  readonly pollIntervalMs: number;
+  readonly runIteration: (workerId: string, ...) => Promise<...>;
+  readonly onResult?: (result: ...) => void;
+  readonly onIdle?: () => void;
+}
 
-Retry and dead-letter behavior lives in `src/storage/delivery-store.ts` plus `src/daemon/delivery-service.ts`.
+export function createWorkerPool(options: WorkerPoolOptions): {
+  start(): void;
+  stop(): Promise<void>;
+}
+```
 
-- retryable adapter result: schedules a future `available_at`
-- fatal adapter result: dead-letters immediately
-- process/setup failure: either retries or dead-letters depending on failure mode and attempt count
-- expired lease: reclaimed back to `ready` by recovery scan, or dead-lettered if appropriate
+**Design:** N concurrent slots, each running its own poll loop. When a slot finds no work, it waits `pollIntervalMs` then retries. Slots are independent — no shared queue coordination needed because the delivery store's `claimNextDelivery()` is already atomic (SQLite serializes concurrent writes).
 
-`src/daemon/recovery-scan.ts` periodically:
+**SQLite concurrency concern (MEDIUM confidence):** Node.js's `node:sqlite` (experimental, WAL mode) serializes writes but allows concurrent reads. Since `claimNextDelivery()` is a write (`UPDATE ... WHERE status = 'ready' LIMIT 1`), concurrent calls from the same database connection will serialize. The `DatabaseSync` API is synchronous — no async/await — which means multiple concurrent JS calls to `claimNextDelivery()` will run in turn, not in parallel, at the SQLite level. This is safe: no double-claim risk.
 
-- reclaims expired leases
-- re-emits pending approvals
-- re-emits ready deliveries
+**What does parallelize:** Each `runPreparedAdapterCommand()` spawns a child process and awaits its exit. These child processes run truly in parallel (OS-level). So with `concurrency: 4`, up to 4 agent processes can run simultaneously. The SQLite operations between them serialize fine because they're fast and infrequent relative to agent process run time.
 
-`src/daemon/replay-service.ts` supports replay of:
+**CLI change:** `worker-command.ts` adds `--concurrency N` flag (default 1). When N=1, behavior is identical to current (backwards-compatible).
 
-- individual replayable deliveries
-- all deliveries for a replayable event
+---
 
-Replayable delivery states are currently `completed`, `dead_letter`, `retry_scheduled`, and `ready`.
+### 4. Env Isolation
 
-## Durable State Model
+**Current state:** In `process-runner.ts` line 94-97:
 
-SQLite is the only durable backend in the current implementation.
+```typescript
+env: {
+  ...process.env,           // <-- full parent environment leaked
+  ...input.execution.environment
+}
+```
 
-### Tables
+And in `registry.ts` `buildBaseEnvironment()`, agent-defined environment vars (`agent.environment`) plus AGENT_BUS_* vars are built. But they are merged on top of `process.env`, not replacing it.
 
-| Table | Purpose |
-| --- | --- |
-| `schema_migrations` | Tracks applied SQL migrations |
-| `runs` | Top-level workflow instance metadata |
-| `events` | Immutable published envelopes plus approval status and producer metadata |
-| `event_artifacts` | Artifact references attached to each event |
-| `deliveries` | One row per event/subscriber target with lease, retry, and replay metadata |
-| `approvals` | Manual approval work and decisions |
+**Recommended isolation model:**
 
-### Important Invariants
+Two modes, configured per-agent in the manifest:
 
-- `events.dedupe_key` is unique
-- `deliveries(event_id, agent_id)` is unique
-- foreign keys are enabled
-- journal mode is WAL
-- artifact paths must remain repository-relative
-- work-package result and log paths must stay inside state/log directories
+- `envMode: "inherit"` (default, backwards-compatible) — current behavior, `process.env` + agent env
+- `envMode: "isolated"` — only the AGENT_BUS_* contract vars + explicit `agent.environment` entries + a minimal safe set (`PATH`, `HOME`, `USER`, `TMPDIR`, `LANG`, `TERM`)
 
-### File-System Side Effects
+**Manifest schema change:**
 
-Runtime state is split between SQLite and repository-local files:
+```typescript
+// In AgentSchema
+envMode: z.enum(["inherit", "isolated"]).default("inherit")
+```
 
-- workspace artifacts under the manifest-configured workspace root
-- adapter-run work packages and result envelopes under `stateDir/adapter-runs/`
-- adapter stdout/stderr logs under `logsDir/adapter-runs/`
+**Registry change:** `buildBaseEnvironment()` returns only the AGENT_BUS_* vars plus `agent.environment`. The caller (`process-runner.ts`) decides whether to prepend `process.env` based on `envMode`.
 
-This means the filesystem is part of the runtime contract, not just an implementation detail.
+**Process-runner change:** `PreparedAdapterCommand` gains an optional `envMode` field. `runPreparedAdapterCommand()` builds `env` as:
 
-## Adapter Boundary
+```typescript
+const safeBase = envMode === "isolated"
+  ? pickSafeParentEnv(process.env)   // PATH, HOME, USER, TMPDIR, LANG, TERM
+  : process.env;
+env: { ...safeBase, ...input.execution.environment }
+```
 
-The adapter contract in `src/adapters/contract.ts` is the current runtime boundary between orchestration and an agent process.
+No new files required for this feature.
 
-Inputs:
+---
 
-- agent metadata
-- delivery context
-- event context
-- required artifacts
-- resolved artifact input absolute paths
-- workspace/result/log paths
+### 5. MCP Server
 
-Outputs:
+**Scope from ROADMAP.md:** Agents publish events directly via MCP tool (`publish_event`) instead of (or in addition to) the result envelope. Result envelope is simplified: `status` + `outputArtifacts`. MCP tools: `publish_event`, `get_delivery`, `list_artifacts`. Connection info passed via work package env vars.
 
-- `success`
-- `retryable_error`
-- `fatal_error`
-- optional emitted follow-up events
-- output artifact references
+**Transport choice:** stdio is the correct choice for embedding in the daemon process that spawns child processes. HTTP (SSE or streamable HTTP per MCP 2025-03 spec) would be better for multi-client access but requires a TCP port and auth. For v1.1 (single-machine, local-first), stdio transport on a dedicated pipe or Unix socket is sufficient. Recommend: **HTTP on localhost with a randomly assigned port**, written into each work package as `AGENT_BUS_MCP_URL`. This avoids process-level stdio conflicts (the agent's own stdout/stderr is already used for log capture).
 
-Built-in command shaping exists for:
+**New file: `src/daemon/mcp-server.ts`**
 
-- `codex`
-- `open-code`
-- `gemini`
+```typescript
+export interface McpServerOptions {
+  readonly daemon: AgentBusDaemon;
+  readonly logger?: Logger;
+  readonly port?: number;   // 0 = OS-assigned
+}
 
-All other runtime identities fall back to the manifest-declared command unchanged.
+export interface McpServer {
+  readonly url: string;     // http://127.0.0.1:<port>
+  stop(): Promise<void>;
+}
 
-## Operator Read Model
+export async function startMcpServer(options: McpServerOptions): Promise<McpServer>
+```
 
-Operator views are assembled in `src/daemon/operator-service.ts` from multiple stores.
+**MCP protocol:** The MCP specification (2024-11 and 2025-03) uses JSON-RPC 2.0. For a localhost HTTP server, the streamable HTTP transport (POST `/mcp`) is the current spec. The server does not require the full `@modelcontextprotocol/sdk` — the transport can be implemented with Node.js built-in `node:http`. Tool dispatch is a small JSON-RPC router.
 
-Exposed read models:
+**Three tools to expose:**
 
-- run summaries
-- run detail
-- pending approval views
-- failure-delivery views
+| Tool | Input | Output | Maps to daemon method |
+|------|-------|--------|-----------------------|
+| `publish_event` | `{ topic, payload, artifactRefs?, dedupeKey? }` | `{ eventId }` | `daemon.publish(envelope)` |
+| `get_delivery` | `{ deliveryId }` | Delivery record | `daemon.listDeliveriesForEvent()` or new `getDelivery()` |
+| `list_artifacts` | `{ pattern? }` | `string[]` (paths) | filesystem scan of `layout.workspaceDir` |
 
-Important detail: the operator-facing run status is derived from deliveries and approvals at read time. It is not the same thing as the persisted `runs.status` field.
+**Work package integration:** When MCP server starts, its URL is injected into the work package `workspace` object (new field `mcpUrl?: string`) and surfaced as an env var `AGENT_BUS_MCP_URL`. Agents that want to publish mid-run POST to this URL instead of (or in addition to) writing a result envelope.
 
-## Test Coverage Snapshot
+**Result envelope simplification:** Once agents can publish via MCP, the `events` array in the result envelope becomes optional/deprecated. The `success` result only needs `status`, `outputArtifacts`, and optional `summary`. This is backwards-compatible — `events: []` (the default) still works.
 
-The repository currently has:
+**Authentication:** For v1.1 (single machine, single user), no authentication on the MCP server is required. The URL is not published beyond the work package env var. This is a local-only trust boundary.
 
-- 25 test files
-- 66 `node:test` test cases
+**Integration into `startDaemon()`:**
 
-Coverage focuses on:
+```typescript
+// StartDaemonOptions gains:
+readonly mcpServer?: {
+  readonly enabled: boolean;
+  readonly port?: number;
+}
 
-- manifest and schema validation
-- artifact-path normalization
-- store behavior and migration-backed persistence
-- publish/fan-out semantics
-- approvals, retry, dead-letter, replay, and recovery
-- worker execution and adapter contract handling
-- CLI operator flows
-- end-to-end demo workflow behavior
+// startDaemon() conditionally starts MCP server and stores the URL
+// in layout or passes it down when building work packages
+```
 
-## Current Architecture Pressure Points
+**`adapter-worker.ts` change:** When building work packages, if `mcpServerUrl` is set on the daemon, it is included in the `workspace` object and passed as env var. This is the only change to the work package contract — backwards-compatible since it's additive.
 
-These are the most relevant findings for planned `v1.1` backend extraction work.
+---
 
-### 1. Backend boundaries are not extracted yet
+## Data Flow Changes (v1.0 → v1.1)
 
-`startDaemon()` wires concrete SQLite stores directly into services. Cross-module typing uses `ReturnType<typeof create...Store>` aliases instead of backend-neutral interfaces. The code is modular, but not yet contract-driven.
+### v1.0 Flow
 
-### 2. Dispatch is still storage-shaped
+```
+claim delivery
+  → build work package (no mcpUrl)
+  → spawn process (inherits full process.env, no timeout)
+  → pipe stdout+stderr to flat log file
+  → wait for exit (no timeout)
+  → read result.json (events array)
+  → publish follow-up events
+  → acknowledge delivery
+```
 
-The `dispatcher` only records deduplicated notifications for approvals and ready deliveries. It is not a pluggable queue, scheduler, or delivery backend. Lease ownership, retry timing, and replay semantics remain SQLite-store concerns.
+### v1.1 Flow
 
-### 3. Manifest behavior runs ahead of implementation in a few places
+```
+claim delivery (potentially from concurrent slot N of M)
+  → build work package (mcpUrl injected if MCP enabled)
+  → spawn process (isolated or inherited env, timeout set)
+  → pipe stdout+stderr to flat log file; structured log: process.started
+  → wait for exit OR timeout (SIGTERM → SIGKILL after grace period)
+  → structured log: process.completed
+  → read result.json (events optional — agent may have published via MCP)
+  → publish any remaining follow-up events from result.json
+  → acknowledge delivery
+  → structured log: delivery.completed
+```
 
-The manifest schema validates more than the runtime currently enforces:
+The MCP path runs in parallel with the spawned process: agent publishes events mid-run via HTTP POST → daemon handles publish_event → fans out deliveries immediately (before the agent process exits). The result envelope `events` array is then a fallback for agents that do not use MCP.
 
-- `approvalGates[].approvers` is parsed but not checked when approvals are executed
-- `approvalGates[].onReject` is parsed but not applied; rejection always cancels downstream deliveries
-- `artifactConventions` is validated and documented but not consumed by the runtime
+---
 
-This is the clearest doc/schema/runtime drift in the codebase.
+## Component Boundaries After v1.1
 
-### 4. Run lifecycle is split between persisted and derived state
+| Component | Responsibility | Communicates With |
+|-----------|---------------|-------------------|
+| `daemon/index.ts` | Composition root, lifecycle | All layers |
+| `daemon/adapter-worker.ts` | Single delivery execution | process-runner, stores, dispatcher |
+| `daemon/worker-pool.ts` (new) | N concurrent worker slots | adapter-worker |
+| `daemon/mcp-server.ts` (new) | MCP HTTP transport, tool routing | daemon facade |
+| `daemon/delivery-service.ts` | Delivery state transitions | deliveryStore, runStore, dispatcher |
+| `daemon/recovery-scan.ts` | Stale lease recovery, approval fan-out | stores, dispatcher |
+| `adapters/process-runner.ts` | spawn, timeout, log pipe | OS child_process |
+| `adapters/registry.ts` | Build adapter command + env | vendor adapters |
+| `shared/logger.ts` (new) | Structured JSON log emission | stderr |
+| `config/manifest-schema.ts` | Zod schema for agent-bus.yaml | all consumers |
 
-`runs.status` exists in the schema, but the runtime never drives it through `completed`, `failed`, or `cancelled`. Operator status is derived from current deliveries and approvals instead. That makes the read model useful, but the domain model incomplete.
+---
 
-### 5. Runtime-family semantics are slightly mixed
+## Anti-Patterns to Avoid
 
-The registry treats `codex`, `open-code`, and `gemini` as first-class runtime families. The example manifests and several tests also use `claude-code`, but that identity goes through the generic fallback path rather than the supported-runtime registry. That is workable, but it should be made explicit in future backend and adapter contracts.
+### Anti-Pattern 1: Replacing cli/output.ts with the structured logger
 
-### 6. "Daemon" currently means a local composition root more than a resident service
+**What:** Routing operator-facing CLI text output through the new JSON logger.
+**Why bad:** CLI consumers expect human-readable text. JSON output on `agent-bus runs list` would break the operator UX. The two concerns — operator UX output and daemon internal observability — must stay separate.
+**Instead:** Keep `cli/output.ts` as-is. Logger writes to `stderr` (or a configurable log file). CLI text goes to `stdout`.
 
-The current control flow is centered on:
+### Anti-Pattern 2: Putting the MCP server on stdio
 
-- transient daemon instances for operator commands
-- a long-lived worker polling loop for actual execution
-- recovery scanning as an in-process timer
+**What:** Using stdio transport (as in the MCP SDK's default) for the embedded MCP server in the daemon.
+**Why bad:** The daemon process already uses its own stdio for CLI output. Child processes use stdin (ignored) and stdout/stderr (piped to log files). Sharing stdio between the daemon and an MCP transport creates multiplexing complexity.
+**Instead:** HTTP on localhost (random port). URL passed via work package env var. Simple, no multiplexing needed.
 
-That is fine for local-first V1, but it is the exact boundary that `v1.1` will need to formalize before alternate backends can exist cleanly.
+### Anti-Pattern 3: Sharing a single `DatabaseSync` connection across concurrent workers with a connection pool
+
+**What:** Creating multiple `DatabaseSync` instances thinking it will improve concurrency.
+**Why bad:** `node:sqlite` (WAL mode) allows concurrent readers but serializes writers. `claimNextDelivery()` is a write. Multiple connections do not speed this up and add complexity. The real concurrency win comes from parallel child process execution, not parallel SQLite writes.
+**Instead:** Single `DatabaseSync` connection. The pool just runs multiple independent JS async loops that share it. SQLite serializes naturally.
+
+### Anti-Pattern 4: Making timeoutMs a daemon-global config only
+
+**What:** One timeout for all agents, set at the CLI level.
+**Why bad:** Different agents have wildly different expected run times. A planning agent might legitimately run for 10 minutes; a formatter might time out in 30 seconds.
+**Instead:** Per-agent `timeoutMs` in the manifest, with a daemon-level `defaultTimeoutMs` fallback for agents that do not specify.
+
+### Anti-Pattern 5: Adding MCP authentication for v1.1
+
+**What:** Adding API keys, JWT, or mutual TLS to the MCP server endpoint.
+**Why bad:** Adds complexity that provides no real security benefit on a single-user local machine. The attack surface is `localhost` only.
+**Instead:** No auth for v1.1. Document the trust boundary clearly. Add auth when/if multi-user or remote scenarios emerge (v1.3+).
+
+---
+
+## Build Order (Dependency-Ordered)
+
+The features have the following dependency chain:
+
+```
+1. manifest-schema.ts changes (timeoutMs, envMode, mcpServer config)
+   └── all other features consume the new manifest fields
+
+2. shared/logger.ts (new, standalone)
+   └── no dependencies on other new features
+
+3. Process timeouts (process-runner.ts + registry.ts + adapter-worker.ts)
+   └── depends on manifest-schema.ts changes only
+   └── lowest risk, existing plumbing, targeted change
+
+4. Env isolation (process-runner.ts + registry.ts)
+   └── depends on manifest-schema.ts changes (envMode field)
+   └── touches same files as timeout but orthogonal change
+
+5. Structured logging (logger.ts → daemon/index.ts → adapter-worker.ts)
+   └── depends on logger.ts being created
+   └── additive only — no behavior changes
+
+6. Concurrent workers (worker-pool.ts → worker-command.ts)
+   └── depends on adapter-worker.ts being stable (after timeout + logging changes)
+   └── new file + CLI flag addition — low coupling risk
+
+7. MCP server (mcp-server.ts → daemon/index.ts → adapter-worker.ts → contract.ts)
+   └── depends on all above being stable
+   └── largest new surface area; additive to work package schema
+   └── should be built last — most integration points
+```
+
+**Recommended phase order:**
+
+| Phase | Features | Rationale |
+|-------|----------|-----------|
+| Phase 1 | manifest-schema changes + process timeouts + env isolation | Pure configuration + targeted plumbing. Validates manifest-first approach. Low risk, high value. |
+| Phase 2 | structured logging | Additive only. Makes Phase 3+ observable. No behavior risk. |
+| Phase 3 | concurrent workers | Builds on stable adapter-worker. New file, minimal modification. |
+| Phase 4 | MCP server | Largest new surface. Requires all prior phases stable. Changes work package schema (additive). |
+
+---
+
+## Scalability Considerations
+
+| Concern | v1.1 (local, 1-4 workers) | v1.2+ |
+|---------|--------------------------|-------|
+| SQLite write contention | Non-issue: claims serialize, agents run in parallel | Consider WAL checkpoint tuning |
+| MCP server throughput | Single-threaded Node.js HTTP sufficient for local use | Add connection pooling if multi-tenant |
+| Log volume | Per-run flat files + structured daemon log | Add log rotation (size/age) |
+| Timeout enforcement | SIGTERM + SIGKILL grace period | Per-agent escalation policy |
+
+---
+
+## Open Questions
+
+1. **MCP result envelope simplification timing:** Should `events` in `AdapterResultEnvelope` be deprecated in v1.1 (when MCP launches) or kept fully supported indefinitely? Backwards-compatible to keep; simplifies agent authoring to deprecate. Recommend: keep `events` working, add `mcpUrl` as an opt-in path. Deprecation in v1.2.
+
+2. **Worker pool stop behavior:** When `stop()` is called on a running pool, should in-flight deliveries be allowed to complete (graceful) or killed immediately? Graceful is safer (avoids retry storms) but may delay shutdown. Recommend: graceful with a configurable `shutdownTimeoutMs`.
+
+3. **MCP `list_artifacts` scope:** The ROADMAP says `list_artifacts` but does not define the query shape. Does it list all artifacts in `workspaceDir`? Filter by topic convention? Filter by current delivery's `artifactRefs`? Needs clarification before implementing.
+
+4. **`get_delivery` storage gap:** `AgentBusDaemon` does not expose a `getDelivery(deliveryId)` method — only `listDeliveriesForEvent()`. A new `getDelivery()` method is needed on the daemon facade (delegating to `deliveryStore.getDelivery()`). Minor addition.
+
+---
+
+## Sources
+
+- Direct codebase analysis: `src/adapters/process-runner.ts`, `src/daemon/adapter-worker.ts`, `src/daemon/index.ts`, `src/daemon/worker-pool.ts`, `src/cli/worker-command.ts`, `src/adapters/registry.ts`, `src/config/manifest-schema.ts` — HIGH confidence
+- ROADMAP.md MCP server description — HIGH confidence (authoritative project intent)
+- MCP specification transport model (HTTP vs stdio) — MEDIUM confidence (based on training data knowledge of MCP 2024-11 and 2025-03 specs; `node:sqlite` WAL behavior is documented in Node.js 22 experimental docs)

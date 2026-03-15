@@ -28,7 +28,7 @@ The verifier checks the CODEBASE, not SUMMARY claims.
 **Phase:** $ARGUMENTS (required — phase number to verify)
 
 **Required files:**
-- `.gsd/SPEC.md` — Original requirements
+- `.gsd/SPEC.md` — Original projected spec
 - `.gsd/ROADMAP.md` — Phase definition with must-haves
 - `.gsd/phases/{phase}/*-SUMMARY.md` — What was implemented
 </context>
@@ -39,7 +39,7 @@ The verifier checks the CODEBASE, not SUMMARY claims.
 
 Read:
 - Phase definition from `.gsd/ROADMAP.md`
-- Original requirements from `.gsd/SPEC.md`
+- Original requirements from `.gsd/SPEC.md` and `.gsd/REQUIREMENTS.md`
 - All SUMMARY.md files from `.gsd/phases/{phase}/`
 
 ---

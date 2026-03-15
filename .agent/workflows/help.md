@@ -34,6 +34,7 @@ CORE WORKFLOW
 ─────────────
 /map              Analyze codebase → ARCHITECTURE.md
 /plan [N]         Create PLAN.md files for phase N
+/sync-planning-to-gsd [N]  Project `.planning/` into `.gsd/`
 /execute [N]      Wave-based execution with atomic commits
 /verify [N]       Must-haves validation with proof
 /debug [desc]     Systematic debugging (3-strike rule)
@@ -60,6 +61,7 @@ NAVIGATION & STATE
 /progress         Show current position in roadmap
 /pause            Save state for session handoff
 /resume           Restore from last session
+/quick [id]       Execute a standalone task from `.planning/quick/`
 /add-todo         Quick capture idea
 /check-todos      List pending items
 
@@ -71,24 +73,24 @@ UTILITIES
 
 QUICK START
 ───────────
-1. /new-project      → Initialize with deep questioning
-2. /plan 1           → Create Phase 1 plans
-3. /execute 1        → Implement Phase 1
-4. /verify 1         → Confirm it works
-5. Repeat
+1. /plan 1                  → Create Phase 1 plans in `.planning/`
+2. /research-phase 1        → Deepen technical context if needed
+3. /sync-planning-to-gsd 1  → Project the plan into `.gsd/`
+4. /execute 1               → Implement from `.gsd/`
+5. /verify 1                → Confirm it works
 
 ───────────────────────────────────────────────────────
 
 CORE RULES
 ──────────
-🔒 Planning Lock     No code until SPEC.md is FINALIZED
-💾 State Persistence Update STATE.md after every task
+🔒 Planning Lock     No code until `.planning/` docs are ready and synced
+💾 State Persistence `.planning/STATE.md` is canonical; `.gsd/JOURNAL.md` holds execution notes
 🧹 Context Hygiene   3 failures → state dump → fresh session
 ✅ Empirical Valid.  Proof required, no "it should work"
 
 ───────────────────────────────────────────────────────
 
-📚 Docs: GSD-STYLE.md, .gsd/examples/
+📚 Docs: PROJECT_RULES.md, GSD-STYLE.md, .planning/README.md
 
 ───────────────────────────────────────────────────────
 ```

@@ -1,49 +1,87 @@
-# ROADMAP.md
+<!-- AUTO-GENERATED from .planning/ROADMAP.md by scripts/sync-planning-to-gsd.mjs. Edit the source file, not this projection. -->
 
-> **Current Phase**: Milestone Planning
-> **Milestone**: v1.1
-> **Goal**: Separate workflow semantics from storage and dispatch implementation details so future backends can be added without breaking the stable SQLite local-first workflow.
+# Roadmap: Agent Bus
 
-## Milestone Context
-- [x] `v1.0` is complete and remains the stable baseline.
-- [ ] `v1.1` will extract backend contracts and preserve current behavior on SQLite.
-- [ ] Distributed server, API, MCP, or Kafka-backed execution is explicitly deferred beyond this milestone.
+## Milestones
 
-## Must-Haves
-- [ ] Define backend contracts for runs, events, approvals, deliveries, replay, and operator read models.
-- [ ] Refactor the current SQLite-backed implementation behind those contracts without changing manifest, envelope, or CLI behavior.
-- [ ] Separate dispatch and worker lifecycle logic from backend-specific persistence details.
-- [ ] Add backend-neutral conformance coverage so future implementations can prove the same workflow semantics.
-- [ ] Document the extension path for future API, MCP, or broker-backed control planes.
-
-## Nice-To-Haves
-- [ ] Add a lightweight in-memory or fake backend for faster tests.
-- [ ] Add explicit backend selection in runtime startup or config.
-- [ ] Capture a concrete design spike for a future Node control plane plus external broker backend.
+- ✅ **v1.0 Core Runtime** — Phases 1-4 (shipped 2026-03-10)
+- 🚧 **v1.1 Production Hardening** — Phases 5-8 (in progress)
+- ○ **v1.2 Developer Experience** — SDK/library mode, event schema registry, web dashboard, plugin system for adapters
+- ○ **v1.3 Scale & Ecosystem** — PostgreSQL backend option, distributed worker support, adapter marketplace, multi-repo orchestration
 
 ## Phases
 
-### Phase 1: Backend Contracts
-**Status**: ⬜ Not Started
-**Objective**: Define the domain-owned interfaces and invariants for workflow state, routing, approval transitions, replay, and operator reads before any implementation refactor begins.
-**Requirements**: REQ-05, REQ-06, REQ-07, REQ-08, REQ-11, REQ-12
+<details>
+<summary>✅ v1.0 Core Runtime (Phases 1-4) — SHIPPED 2026-03-10</summary>
 
-### Phase 2: SQLite Backend Extraction
-**Status**: ⬜ Not Started
-**Objective**: Move the existing SQLite repositories and daemon orchestration logic behind the new contracts while preserving all current V1 behavior and operator workflows.
-**Requirements**: REQ-03, REQ-04, REQ-05, REQ-06, REQ-07, REQ-08, REQ-11, REQ-12
+Phases 1-4 delivered the core event-driven orchestration runtime: manifest-driven configuration, SQLite-backed durable delivery, approval gates, retry/dead-letter/replay, runtime adapters (Codex, Gemini CLI, Open Code), and CLI operator tooling. 66/66 tests passing at ship.
 
-### Phase 3: Dispatch and Worker Boundary
-**Status**: ⬜ Not Started
-**Objective**: Isolate claim, lease, retry, dead-letter, and worker-execution coordination from the local storage implementation so alternate dispatch backends can plug in cleanly.
-**Requirements**: REQ-03, REQ-04, REQ-06, REQ-07, REQ-08, REQ-10, REQ-12
+</details>
 
-### Phase 4: Conformance and Compatibility
-**Status**: ⬜ Not Started
-**Objective**: Build backend-neutral verification coverage that proves the same publish, approval, replay, failure, and operator semantics remain intact across implementations.
-**Requirements**: REQ-03, REQ-04, REQ-08, REQ-11, REQ-12
+### 🚧 v1.1 Production Hardening (In Progress)
 
-### Phase 5: Extension Blueprint
-**Status**: ⬜ Not Started
-**Objective**: Document how future API, MCP, server, or broker-backed backends can fit the extracted contracts without redefining the manifest or event protocol.
-**Requirements**: REQ-01, REQ-11, REQ-12
+**Milestone Goal:** Harden the runtime for real-world unattended use — agents cannot hang indefinitely, daemon secrets do not leak, delivery processing scales to concurrent work, and agents can publish follow-up events directly via an embedded MCP server.
+
+## Phase Details
+
+### Phase 5: Foundation Safety
+**Goal**: Operators can configure per-agent process timeouts and the daemon reliably terminates hung agent process trees
+**Depends on**: Phase 4 (v1.0 complete)
+**Requirements**: TIMEOUT-01, TIMEOUT-02, TIMEOUT-03, TIMEOUT-04
+**Success Criteria** (what must be TRUE):
+  1. Operator sets `timeout` field in agent manifest and the daemon honors it — processes running past the limit are killed
+  2. Sending SIGTERM kills the entire agent process group (not just the direct child), so shell wrappers and grandchild processes are terminated
+  3. After SIGTERM, the daemon escalates to SIGKILL if the process group does not exit within the configured grace period
+  4. A timed-out delivery is rescheduled for retry rather than immediately moved to the dead-letter queue
+**Plans**: 3 plans
+
+Plans:
+- [x] 05-01-PLAN.md — Add `timeout` field to AgentSchema (manifest schema + tests) ✓ COMPLETE
+- [x] 05-02-PLAN.md — Process group kill + SIGKILL escalation in process-runner.ts (fixture + tests) ✓ COMPLETE
+- [x] 05-03-PLAN.md — Per-delivery monitor wiring + timeout-retry integration test in adapter-worker.ts ✓ COMPLETE
+
+### Phase 6: Structured Logging
+**Goal**: Operators can filter and correlate daemon log output by delivery or agent without additional tooling
+**Depends on**: Phase 5
+**Requirements**: LOG-01, LOG-02, LOG-03
+**Success Criteria** (what must be TRUE):
+  1. Daemon writes NDJSON-formatted log lines to stderr for every delivery lifecycle event (claim, start, complete, retry, dead-letter)
+  2. Every log line includes `deliveryId`, `agentId`, `runId`, `level`, and `timestamp` fields
+  3. Operator can pipe daemon stderr to `jq` or `grep` and filter to a single delivery or agent with a one-liner
+**Plans**: 2 plans
+
+Plans:
+- [ ] 06-01-PLAN.md — Install pino, create logger factory, thread through daemon, emit lifecycle log calls
+- [ ] 06-02-PLAN.md — Wire --log-level CLI flag and verify NDJSON stderr output
+
+### Phase 7: Concurrent Workers
+**Goal**: Operators can run multiple deliveries in parallel and the daemon drains cleanly on shutdown
+**Depends on**: Phase 6
+**Requirements**: WORKER-01, WORKER-02, WORKER-03
+**Success Criteria** (what must be TRUE):
+  1. Operator starts daemon with `--concurrency N` and up to N agent processes run simultaneously
+  2. Daemon started without `--concurrency` flag defaults to concurrency 1, preserving existing single-delivery behavior
+  3. On receiving a stop signal, the daemon completes all in-flight deliveries before exiting — no deliveries are abandoned mid-execution
+**Plans**: TBD
+
+### Phase 8: Embedded MCP Server
+**Goal**: Agents can publish follow-up events directly during execution by calling the MCP `publish_event` tool
+**Depends on**: Phase 7
+**Requirements**: MCP-01, MCP-02, MCP-03, MCP-04
+**Success Criteria** (what must be TRUE):
+  1. Daemon starts an MCP HTTP server on localhost when it starts; server is accessible without any additional setup by the operator
+  2. Agent receives `AGENT_BUS_MCP_URL` env var in its work package and can use it to reach the MCP server
+  3. Agent can call the `publish_event` MCP tool during execution and the event appears in the event store immediately
+  4. An agent identity file that calls `publish_event` via MCP successfully publishes follow-up events without writing an `events` array in the result envelope
+**Plans**: TBD
+
+## Progress
+
+**Execution Order:** 5 → 6 → 7 → 8
+
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 5. Foundation Safety | v1.1 | 3/3 | ✅ COMPLETE | 2026-03-14 |
+| 6. Structured Logging | v1.1 | 0/2 | Not started | - |
+| 7. Concurrent Workers | v1.1 | 0/? | Not started | - |
+| 8. Embedded MCP Server | v1.1 | 0/? | Not started | - |

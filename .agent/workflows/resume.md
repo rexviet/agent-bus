@@ -1,22 +1,74 @@
 ---
-description: Restore context from previous session
+description: Restore context from canonical planning state plus recent execution notes
 ---
 
 # /resume Workflow
 
+Repository override: resume from `.planning/STATE.md` first. `.gsd/STATE.md` is only a projection snapshot and should not be treated as the canonical handoff document.
+
 <objective>
-Start a new session with full context from where we left off.
+Start a fresh session with the minimum files needed to continue correctly.
 </objective>
 
 <process>
 
-## 1. Load Saved State
+## 1. Load Canonical State
 
-Read `.gsd/STATE.md` completely.
+Read completely:
+- `.planning/STATE.md`
+
+Also read as needed:
+- `.planning/ROADMAP.md`
+- `.planning/PROJECT.md`
 
 ---
 
-## 2. Display Context
+## 2. Load Execution Context If Relevant
+
+If the last session was implementation or verification work, inspect:
+- `.gsd/JOURNAL.md` — latest execution session notes
+- `.gsd/ROADMAP.md` — execution projection status
+- `.gsd/phases/{N}/` — active phase plan / summary / verification files when continuing a specific phase
+
+Do not rely on `.gsd/STATE.md` as the source of truth.
+
+---
+
+## 3. Check Projection Freshness
+
+Compare `.planning/` against `.gsd/`:
+
+- If `.gsd/` is missing: execution workspace not synced yet
+- If `.planning/STATE.md` or `.planning/ROADMAP.md` is newer: `.gsd/` is stale
+- If they match closely: execution workspace is ready
+
+If stale, the next step is usually `/sync-planning-to-gsd` before `/execute`.
+
+---
+
+## 4. Check Worktree Status
+
+```bash
+git status --porcelain
+```
+
+If changes exist, surface them before suggesting the next command.
+
+---
+
+## 5. Mark Session Active
+
+If you need to persist the restart moment, update `.planning/STATE.md`:
+
+```markdown
+**Status**: Active (resumed {timestamp})
+```
+
+Do not write this into `.gsd/STATE.md`.
+
+---
+
+## 6. Display Context
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -25,26 +77,33 @@ Read `.gsd/STATE.md` completely.
 
 LAST POSITION
 ─────────────
-Phase: {phase from STATE.md}
-Task: {task from STATE.md}
+Track: {track from .planning/STATE.md}
+Phase: {phase}
+Task: {task}
 Status: {status when paused}
 
 ───────────────────────────────────────────────────────
 
 CONTEXT FROM LAST SESSION
 ─────────────────────────
-{Context dump content from STATE.md}
+{Context dump from .planning/STATE.md}
 
 ───────────────────────────────────────────────────────
 
-BLOCKERS
-────────
-{Blockers from STATE.md, or "None"}
+EXECUTION NOTES
+───────────────
+{Latest relevant notes from .gsd/JOURNAL.md, if any}
 
 ───────────────────────────────────────────────────────
 
-NEXT STEPS (from last session)
-──────────────────────────────
+SYNC STATUS
+───────────
+{current | stale | missing}
+
+───────────────────────────────────────────────────────
+
+NEXT STEPS
+──────────
 1. {First priority}
 2. {Second priority}
 3. {Third priority}
@@ -54,78 +113,16 @@ NEXT STEPS (from last session)
 
 ---
 
-## 3. Load Recent Journal
+## 7. Suggest Action
 
-Show last entry from `.gsd/JOURNAL.md`:
-- What was accomplished
-- Handoff notes
-- Any issues encountered
+Recommend the single best next command:
 
----
-
-## 4. Check for Conflicts
-
-```bash
-# Check for uncommitted changes
-git status --porcelain
-```
-
-**If changes found:**
-```
-⚠️ UNCOMMITTED CHANGES DETECTED
-
-{list of modified files}
-
-These may be from the previous session.
-Review before proceeding.
-```
-
----
-
-## 5. Update State
-
-Mark session as active in `.gsd/STATE.md`:
-```markdown
-**Status**: Active (resumed {timestamp})
-```
-
----
-
-## 6. Suggest Action
-
-```
-───────────────────────────────────────────────────────
-
-▶ READY TO CONTINUE
-
-Suggested action based on state:
-
-{One of:}
-• /execute {N} — Continue phase execution
-• /verify {N} — Verify completed phase
-• /plan {N} — Create plans for phase
-• /progress — See full roadmap status
-
-───────────────────────────────────────────────────────
-
-💡 Fresh session = fresh perspective
-
-You have all the context you need.
-The previous struggles are documented.
-Time to solve this with fresh eyes.
-
-───────────────────────────────────────────────────────
-```
+- `/research-phase {N}` — if the phase still needs discovery
+- `/plan {N}` — if planning is the current task
+- `/sync-planning-to-gsd {N}` — if `.planning/` changed after the last sync
+- `/execute {N}` — if the phase is planned and synced
+- `/verify {N}` — if implementation is done and proof is next
+- `/quick {id-or-slug}` — if the active work is a standalone quick task
+- `/progress` — if the user just needs the broader roadmap picture
 
 </process>
-
-<fresh_context_advantage>
-A resumed session has advantages:
-
-1. **No accumulated confusion** — You see the problem clearly
-2. **Documented failures** — You know what NOT to try
-3. **Hypothesis preserved** — Pick up where logic left off
-4. **Full context budget** — 200k tokens of fresh capacity
-
-Often the first thing a fresh context sees is the obvious solution that a tired context missed.
-</fresh_context_advantage>

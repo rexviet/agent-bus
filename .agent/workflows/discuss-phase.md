@@ -85,7 +85,7 @@ Listen for:
 
 ## 5. Document Decisions
 
-Update `.gsd/DECISIONS.md`:
+Update the relevant phase context doc under `.planning/phases/{NN-slug}/` or record the decision in `.planning/STATE.md`:
 
 ```markdown
 ## Phase {N} Decisions
@@ -110,7 +110,7 @@ Update `.gsd/DECISIONS.md`:
 ```
 ───────────────────────────────────────────────────────
 
-✓ Discussion documented in DECISIONS.md
+✓ Discussion documented in the `.planning/` phase context
 
 ▶ NEXT
 

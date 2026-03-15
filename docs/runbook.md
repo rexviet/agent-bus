@@ -239,7 +239,7 @@ Before reading any file:
 **Cause:** Planning lock prevents implementation
 
 **Fix:**
-1. Open `.gsd/SPEC.md`
+1. Open `.planning/PROJECT.md`
 2. Complete all required sections
 3. Change status to `Status: FINALIZED`
 4. Retry command

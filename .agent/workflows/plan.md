@@ -5,6 +5,8 @@ argument-hint: "[phase] [--research] [--skip-research] [--gaps]"
 
 # /plan Workflow
 
+Repository override: in this project, planning and research live in `.planning/`, while execution lives in `.gsd/` after `/sync-planning-to-gsd`. Use `.planning/README.md` for the mapping contract.
+
 <role>
 You are a GSD planner orchestrator. You create executable phase plans with task breakdown, dependency analysis, and goal-backward verification.
 
@@ -33,8 +35,8 @@ Create executable phase prompts (PLAN.md files) for a roadmap phase with integra
 - `--gaps` — Gap closure mode (reads VERIFICATION.md, skips research)
 
 **Required files:**
-- `.gsd/SPEC.md` — Must be FINALIZED (Planning Lock)
-- `.gsd/ROADMAP.md` — Must have phases defined
+- `.planning/PROJECT.md` — Project definition must exist
+- `.planning/ROADMAP.md` — Must have phases defined
 </context>
 
 <philosophy>
@@ -105,24 +107,23 @@ Discovery is MANDATORY unless you can prove current context exists.
 
 **PowerShell:**
 ```powershell
-# Check SPEC.md exists and is finalized
-$spec = Get-Content ".gsd/SPEC.md" -Raw
-if ($spec -notmatch "FINALIZED") {
-    Write-Error "SPEC.md must be FINALIZED before planning"
+# Check core planning docs exist
+if (-not (Test-Path ".planning/PROJECT.md") -or -not (Test-Path ".planning/ROADMAP.md")) {
+    Write-Error ".planning/PROJECT.md and .planning/ROADMAP.md must exist before planning"
     exit
 }
 ```
 
 **Bash:**
 ```bash
-# Check SPEC.md exists and is finalized
-if ! grep -q "FINALIZED" ".gsd/SPEC.md"; then
-    echo "Error: SPEC.md must be FINALIZED before planning" >&2
+# Check core planning docs exist
+if [ ! -f ".planning/PROJECT.md" ] || [ ! -f ".planning/ROADMAP.md" ]; then
+    echo "Error: .planning/PROJECT.md and .planning/ROADMAP.md must exist before planning" >&2
     exit 1
 fi
 ```
 
-**If not finalized:** Error — user must complete SPEC.md first.
+**If missing:** Error — user must prepare the `.planning/` workspace first.
 
 ---
 
@@ -142,12 +143,12 @@ Extract from $ARGUMENTS:
 
 **PowerShell:**
 ```powershell
-Select-String -Path ".gsd/ROADMAP.md" -Pattern "Phase $PHASE:"
+Select-String -Path ".planning/ROADMAP.md" -Pattern "Phase $PHASE:"
 ```
 
 **Bash:**
 ```bash
-grep "Phase $PHASE:" ".gsd/ROADMAP.md"
+grep "Phase $PHASE:" ".planning/ROADMAP.md"
 ```
 
 **If not found:** Error with available phases.
@@ -159,16 +160,19 @@ grep "Phase $PHASE:" ".gsd/ROADMAP.md"
 
 **PowerShell:**
 ```powershell
-$PHASE_DIR = ".gsd/phases/$PHASE"
-if (-not (Test-Path $PHASE_DIR)) {
-    New-Item -ItemType Directory -Path $PHASE_DIR
+$phasePrefix = "{0:d2}-*" -f [int]$PHASE
+$PHASE_DIR = Get-ChildItem ".planning/phases" -Directory | Where-Object { $_.Name -like $phasePrefix } | Select-Object -First 1
+if (-not $PHASE_DIR) {
+    Write-Error "Phase directory .planning/phases/$phasePrefix not found."
+    exit
 }
 ```
 
 **Bash:**
 ```bash
-PHASE_DIR=".gsd/phases/$PHASE"
-mkdir -p "$PHASE_DIR"
+PHASE_GLOB=$(printf "%02d-*" "$PHASE")
+PHASE_DIR=$(find ".planning/phases" -maxdepth 1 -type d -name "$PHASE_GLOB" | head -n 1)
+[ -n "$PHASE_DIR" ] || { echo "Error: phase directory .planning/phases/$PHASE_GLOB not found." >&2; exit 1; }
 ```
 
 ---
@@ -182,16 +186,16 @@ mkdir -p "$PHASE_DIR"
 **Check for existing research:**
 **PowerShell:**
 ```powershell
-Test-Path "$PHASE_DIR/RESEARCH.md"
+@(Get-ChildItem "$PHASE_DIR/*-RESEARCH.md" -ErrorAction SilentlyContinue).Count -gt 0
 ```
 
 **Bash:**
 ```bash
-test -f "$PHASE_DIR/RESEARCH.md"
+ls "$PHASE_DIR"/*-RESEARCH.md >/dev/null 2>&1
 ```
 
 **If RESEARCH.md exists AND `--research` flag NOT set:**
-- Display: `Using existing research: $PHASE_DIR/RESEARCH.md`
+- Display: `Using existing research in $PHASE_DIR`
 - Skip to step 6
 
 **If research needed:**
@@ -205,7 +209,7 @@ Display banner:
 
 Perform research based on discovery level (see `<discovery_levels>`).
 
-Create `$PHASE_DIR/RESEARCH.md` with findings.
+Create `$PHASE_DIR/{NN}-RESEARCH.md` with findings.
 
 ---
 
@@ -220,10 +224,11 @@ Display banner:
 
 ### 6a. Gather Context
 Load:
-- `.gsd/SPEC.md` — Requirements
-- `.gsd/ROADMAP.md` — Phase description
-- `$PHASE_DIR/RESEARCH.md` — If exists
-- `.gsd/ARCHITECTURE.md` — If exists
+- `.planning/PROJECT.md` — Project definition and scope
+- `.planning/REQUIREMENTS.md` — Requirements
+- `.planning/ROADMAP.md` — Phase description
+- `$PHASE_DIR/*-RESEARCH.md` — If exists
+- `.planning/research/ARCHITECTURE.md` — If exists
 
 ### 6b. Decompose into Tasks
 For the phase goal:
@@ -234,7 +239,7 @@ For the phase goal:
 
 ### 6c. Write PLAN.md Files
 
-Create `$PHASE_DIR/{N}-PLAN.md`:
+Create `$PHASE_DIR/{NN}-{plan}-PLAN.md`:
 
 ```markdown
 ---
@@ -249,8 +254,8 @@ wave: 1
 {What this plan delivers and why}
 
 ## Context
-- .gsd/SPEC.md
-- .gsd/ARCHITECTURE.md
+- .planning/PROJECT.md
+- .planning/research/ARCHITECTURE.md
 - {relevant source files}
 
 ## Tasks
@@ -293,15 +298,16 @@ For each plan, verify:
 
 ## 8. Update State
 
-Update `.gsd/STATE.md`:
+Update `.planning/STATE.md`:
 ```markdown
 ## Current Position
 - **Phase**: {N}
 - **Task**: Planning complete
-- **Status**: Ready for execution
+- **Status**: Ready for sync to `.gsd`
 
 ## Next Steps
-1. /execute {N}
+1. /sync-planning-to-gsd {N}
+2. /execute {N}
 ```
 
 ---
@@ -309,8 +315,8 @@ Update `.gsd/STATE.md`:
 ## 9. Commit Plans
 
 ```bash
-git add .gsd/phases/$PHASE/
-git add .gsd/STATE.md
+git add "$PHASE_DIR"
+git add .planning/STATE.md
 git commit -m "docs(phase-$PHASE): create execution plans"
 ```
 
@@ -338,7 +344,8 @@ Plans:
 
 ▶ Next Up
 
-/execute {N} — run all plans
+/sync-planning-to-gsd {N} — project planning into `.gsd/`
+/execute {N} — run the synced plans from `.gsd/`
 
 ───────────────────────────────────────────────────────
 ```
@@ -364,7 +371,8 @@ Plans:
 | Command | Relationship |
 |---------|--------------|
 | `/map` | Run before /plan to get codebase context |
-| `/execute` | Runs PLAN.md files created by /plan |
+| `/sync-planning-to-gsd` | Projects planning outputs into `.gsd/` for execution |
+| `/execute` | Runs `.gsd` PLAN.md files after sync |
 | `/verify` | Validates executed plans |
 
 ### Skills

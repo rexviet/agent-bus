@@ -1,29 +1,42 @@
 ---
-description: Context hygiene — dump state for clean session handoff
+description: Context hygiene — save a clean handoff without treating .gsd projections as canonical state
 ---
 
 # /pause Workflow
 
+Repository override: save canonical handoff state in `.planning/STATE.md`. Use `.gsd/JOURNAL.md` only for execution-local notes. Do not write pause state into auto-generated `.gsd/STATE.md`.
+
 <objective>
-Safely pause work with complete state preservation for session handoff.
+Safely pause planning or execution work with enough context for a clean next session.
 </objective>
 
 <when_to_use>
 - Ending a work session
-- Context getting heavy (many failed attempts)
-- Switching to a different task
+- Context is getting heavy
+- Switching from planning to implementation, or vice versa
 - Before taking a break
-- After 3+ debugging failures (Context Hygiene rule)
+- After repeated failed debugging attempts
 </when_to_use>
 
 <process>
 
-## 1. Capture Current State
+## 1. Decide the Handoff Track
 
-Update `.gsd/STATE.md`:
+Classify the current session:
+- Planning / research work → save to `.planning/STATE.md`
+- Execution / verification work → save canonical next-step state to `.planning/STATE.md`, and detailed execution notes to `.gsd/JOURNAL.md`
+
+If both happened in the same session, update both files.
+
+---
+
+## 2. Update Canonical State
+
+Update `.planning/STATE.md` with the information that must survive future syncs:
 
 ```markdown
 ## Current Position
+- **Track**: planning | execution | mixed
 - **Phase**: {current phase number and name}
 - **Task**: {specific task in progress, if any}
 - **Status**: Paused at {timestamp}
@@ -34,13 +47,13 @@ Update `.gsd/STATE.md`:
 ## In-Progress Work
 {Any uncommitted changes or partial work}
 - Files modified: {list}
-- Tests status: {passing/failing/not run}
+- Tests status: {passing / failing / not run}
 
 ## Blockers
-{What was preventing progress, if anything}
+{What is preventing progress, if anything}
 
 ## Context Dump
-{Critical context that would be lost}:
+{Critical context that would otherwise be lost}
 
 ### Decisions Made
 - {Decision 1}: {rationale}
@@ -51,11 +64,11 @@ Update `.gsd/STATE.md`:
 - {Approach 2}: {outcome}
 
 ### Current Hypothesis
-{Best guess at solution/issue}
+{Best current hypothesis}
 
 ### Files of Interest
-- `{file1}`: {what's relevant}
-- `{file2}`: {what's relevant}
+- `{file1}`: {what matters}
+- `{file2}`: {what matters}
 
 ## Next Steps
 1. {Specific first action for next session}
@@ -63,11 +76,13 @@ Update `.gsd/STATE.md`:
 3. {Third priority}
 ```
 
+This file is the canonical restart point for `/resume`.
+
 ---
 
-## 2. Add Journal Entry
+## 3. Append Execution Notes When Relevant
 
-Create entry in `.gsd/JOURNAL.md`:
+If you were implementing or verifying code, append a session entry to `.gsd/JOURNAL.md`:
 
 ```markdown
 ## Session: {YYYY-MM-DD HH:MM}
@@ -87,41 +102,49 @@ Create entry in `.gsd/JOURNAL.md`:
 {Reason for pausing}
 
 ### Handoff Notes
-{Critical info for resuming}
+{Critical info for resuming execution}
 ```
+
+Use `.gsd/JOURNAL.md` for execution detail, not `.gsd/STATE.md`.
 
 ---
 
-## 3. Commit State
+## 4. Sync If Planning Changed
+
+If the paused session changed planning docs that execution depends on:
+- run `/sync-planning-to-gsd` before stopping, or
+- explicitly note in `.planning/STATE.md` that `.gsd/` is stale and must be re-synced first
+
+---
+
+## 5. Commit State Notes When Appropriate
 
 ```bash
-git add .gsd/STATE.md .gsd/JOURNAL.md
+git add .planning/STATE.md
+git add .gsd/JOURNAL.md  # if updated
 git commit -m "docs: pause session - {brief reason}"
 ```
 
+Skip the commit if the user wants to keep the handoff notes uncommitted for now.
+
 ---
 
-## 4. Display Handoff
+## 6. Display Handoff
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► SESSION PAUSED ⏸
+ GSD ► SESSION PAUSED
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 State saved to:
-• .gsd/STATE.md
-• .gsd/JOURNAL.md
+• .planning/STATE.md
+• .gsd/JOURNAL.md (if execution notes were added)
 
 ───────────────────────────────────────────────────────
 
 To resume later:
 
 /resume
-
-───────────────────────────────────────────────────────
-
-💡 Fresh context = fresh perspective
-   The struggles end here. Next session starts clean.
 
 ───────────────────────────────────────────────────────
 ```
@@ -131,46 +154,30 @@ To resume later:
 <context_hygiene>
 If pausing due to debugging failures:
 
-1. Be explicit about what failed
-2. Document exact error messages
-3. List files that were touched
-4. State your hypothesis clearly
-5. Suggest what to try next (different approach)
-
-A fresh context often immediately sees solutions that a polluted context missed.
+1. Record exactly what failed
+2. Include exact error messages or failing tests
+3. List the files touched
+4. State the current hypothesis clearly
+5. State what to try next, and what not to retry blindly
 </context_hygiene>
 
 <proactive_state_save>
-## Proactive Auto-Save (Session Limit Protection)
+## Proactive Auto-Save
 
-**Problem:** If a session hard-terminates (usage/context limit), `/pause` becomes unreachable.
+If context is getting risky, save first:
 
-**Solution:** The agent should auto-save state BEFORE limits are hit.
-
-### When to Auto-Save
-
-| Trigger | Action |
-|---------|--------|
-| Context usage reaches ~50-70% | Write lightweight state snapshot to `.gsd/STATE.md` |
-| 3-strike debugging rule fires | Save state dump BEFORE recommending `/pause` |
-| Extended session detected | Periodic state checkpoints to `.gsd/STATE.md` |
-
-### Auto-Save Protocol
-
-1. **Detect** context health warning signals (see context-health-monitor skill)
-2. **Write** current state to `.gsd/STATE.md` immediately
-3. **Then** inform the user and recommend `/pause`
-4. If session terminates unexpectedly, state is already saved
+1. Write a lightweight snapshot to `.planning/STATE.md`
+2. If execution is active, append a short note to `.gsd/JOURNAL.md`
+3. Then recommend `/pause`
 
 ### Minimum Auto-Save Content
 
 ```markdown
 ## Auto-Save: {timestamp}
+- **Track**: {planning | execution}
 - **Phase**: {current phase}
 - **Task**: {current task or "between tasks"}
-- **Last Action**: {what was just completed}
+- **Last Action**: {what just completed}
 - **Next Step**: {what should happen next}
 ```
-
-**Key principle:** Save first, recommend second. Never rely on the user being able to issue `/pause`.
 </proactive_state_save>
