@@ -20,6 +20,7 @@
     "unlink:global": "npm unlink -g agent-bus"
   },
   "dependencies": {
+    "pino": "^9.14.0",
     "yaml": "^2.8.2",
     "zod": "^4.3.6"
   },
