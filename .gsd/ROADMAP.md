@@ -1,4 +1,4 @@
-<!-- AUTO-GENERATED from .planning/ROADMAP.md by scripts/sync-planning-to-gsd.mjs. source-sha256: 6190e23564c742dc2451723954ba17c3dc3662f028ba831d7f016cc0bdfe0e3b. Edit the source file, not this projection. -->
+<!-- AUTO-GENERATED from .planning/ROADMAP.md by scripts/sync-planning-to-gsd.mjs. source-sha256: ceeef7be49772b41cecf51c942d6ef6ea93555b51af3ec169e953efcb1562d59. Edit the source file, not this projection. -->
 
 # Roadmap: Agent Bus
 
@@ -18,77 +18,25 @@ Phases 1-4 delivered the core event-driven orchestration runtime: manifest-drive
 
 </details>
 
-### ✅ v1.1 Production Hardening (Shipped 2026-03-16)
+<details>
+<summary>✅ v1.1 Production Hardening (Phases 5-8) — SHIPPED 2026-03-16</summary>
 
-**Milestone Goal:** Harden the runtime for real-world unattended use — agents cannot hang indefinitely, daemon secrets do not leak, delivery processing scales to concurrent work, and agents can publish follow-up events directly via an embedded MCP server.
+Phases 5-8 hardened the runtime for real-world unattended use: per-agent process timeouts with SIGTERM→SIGKILL process-group escalation, pino NDJSON structured logging with delivery/agent/run correlation, concurrent delivery slots with graceful drain-on-shutdown, and an embedded MCP HTTP server enabling agents to publish follow-up events directly during execution. 116/116 tests passing at ship.
 
-## Phase Details
+- [x] Phase 5: Foundation Safety (3/3 plans) — completed 2026-03-14
+- [x] Phase 6: Structured Logging (2/2 plans) — completed 2026-03-15
+- [x] Phase 7: Concurrent Workers (2/2 plans) — completed 2026-03-15
+- [x] Phase 8: Embedded MCP Server (2/2 plans) — completed 2026-03-16
 
-### Phase 5: Foundation Safety
-**Goal**: Operators can configure per-agent process timeouts and the daemon reliably terminates hung agent process trees
-**Depends on**: Phase 4 (v1.0 complete)
-**Requirements**: TIMEOUT-01, TIMEOUT-02, TIMEOUT-03, TIMEOUT-04
-**Success Criteria** (what must be TRUE):
-  1. Operator sets `timeout` field in agent manifest and the daemon honors it — processes running past the limit are killed
-  2. Sending SIGTERM kills the entire agent process group (not just the direct child), so shell wrappers and grandchild processes are terminated
-  3. After SIGTERM, the daemon escalates to SIGKILL if the process group does not exit within the configured grace period
-  4. A timed-out delivery is rescheduled for retry rather than immediately moved to the dead-letter queue
-**Plans**: 3 plans
+Full details: `.planning/milestones/v1.1-ROADMAP.md`
 
-Plans:
-- [x] 05-01-PLAN.md — Add `timeout` field to AgentSchema (manifest schema + tests) ✓ COMPLETE
-- [x] 05-02-PLAN.md — Process group kill + SIGKILL escalation in process-runner.ts (fixture + tests) ✓ COMPLETE
-- [x] 05-03-PLAN.md — Per-delivery monitor wiring + timeout-retry integration test in adapter-worker.ts ✓ COMPLETE
-
-### Phase 6: Structured Logging
-**Goal**: Operators can filter and correlate daemon log output by delivery or agent without additional tooling
-**Depends on**: Phase 5
-**Requirements**: LOG-01, LOG-02, LOG-03
-**Success Criteria** (what must be TRUE):
-  1. Daemon writes NDJSON-formatted log lines to stderr for every delivery lifecycle event (claim, start, complete, retry, dead-letter)
-  2. Every log line includes `deliveryId`, `agentId`, `runId`, `level`, and `timestamp` fields
-  3. Operator can pipe daemon stderr to `jq` or `grep` and filter to a single delivery or agent with a one-liner
-**Plans**: 2 plans
-
-Plans:
-- [x] 06-01-PLAN.md — Install pino, create logger factory, thread through daemon, emit lifecycle log calls ✓ COMPLETE
-- [x] 06-02-PLAN.md — Wire --log-level CLI flag and verify NDJSON stderr output ✓ COMPLETE
-
-### Phase 7: Concurrent Workers
-**Goal**: Operators can run multiple deliveries in parallel and the daemon drains cleanly on shutdown
-**Depends on**: Phase 6
-**Requirements**: WORKER-01, WORKER-02, WORKER-03
-**Success Criteria** (what must be TRUE):
-  1. Operator starts daemon with `--concurrency N` and up to N agent processes run simultaneously
-  2. Daemon started without `--concurrency` flag defaults to concurrency 1, preserving existing single-delivery behavior
-  3. On receiving a stop signal, the daemon completes all in-flight deliveries before exiting — no deliveries are abandoned mid-execution
-**Plans**: 2 plans
-
-Plans:
-- [x] 07-01-PLAN.md — CLI flags, mutex utility, output extensions, per-delivery verbose/workerId wiring ✓ COMPLETE
-- [x] 07-02-PLAN.md — Concurrent slot-loop pool, drain logic, integration tests ✓ COMPLETE
-
-### Phase 8: Embedded MCP Server
-**Goal**: Agents can publish follow-up events directly during execution by calling the MCP `publish_event` tool
-**Depends on**: Phase 7
-**Requirements**: MCP-01, MCP-02, MCP-03, MCP-04
-**Success Criteria** (what must be TRUE):
-  1. Daemon starts an MCP HTTP server on localhost when it starts; server is accessible without any additional setup by the operator
-  2. Agent receives `AGENT_BUS_MCP_URL` env var in its work package and can use it to reach the MCP server
-  3. Agent can call the `publish_event` MCP tool during execution and the event appears in the event store immediately
-  4. An agent identity file that calls `publish_event` via MCP successfully publishes follow-up events without writing an `events` array in the result envelope
-**Plans**: 2 plans
-
-Plans:
-- [x] 08-01-PLAN.md — Install MCP SDK, create mcp-server.ts with publish_event tool + tests ✓ COMPLETE
-- [x] 08-02-PLAN.md — Wire MCP server into daemon lifecycle, CLI flag, env var injection, banner ✓ COMPLETE
+</details>
 
 ## Progress
 
-**Execution Order:** 5 → 6 → 7 → 8
-
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
+| 1–4. Core Runtime | v1.0 | 8/8 | ✅ COMPLETE | 2026-03-10 |
 | 5. Foundation Safety | v1.1 | 3/3 | ✅ COMPLETE | 2026-03-14 |
 | 6. Structured Logging | v1.1 | 2/2 | ✅ COMPLETE | 2026-03-15 |
 | 7. Concurrent Workers | v1.1 | 2/2 | ✅ COMPLETE | 2026-03-15 |
