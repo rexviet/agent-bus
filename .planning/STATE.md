@@ -2,34 +2,28 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Production Hardening
-status: verified
-stopped_at: Phase 8 complete
-last_updated: "2026-03-16T11:40:00Z"
-last_activity: 2026-03-16 — Phase 8 complete (embedded MCP server)
+status: complete
+last_updated: "2026-03-16"
 progress:
   total_phases: 4
   completed_phases: 4
   total_plans: 9
   completed_plans: 9
-  percent: 100
 ---
 
 # Project State
 
-## Current Position
+## Project Reference
 
-- **Phase**: 8 (completed)
-- **Task**: All tasks complete
-- **Status**: Verified
+See: .planning/PROJECT.md (updated 2026-03-16)
 
-## Last Session Summary
+**Core value:** Enable asynchronous, event-driven coordination between multiple agent runtimes inside one repository on one machine with durable orchestration primitives and human-in-the-loop approval gates.
+**Current focus:** Planning next milestone (v1.2)
 
-Phase 8 executed successfully.
+## Milestone v1.1 — COMPLETE
 
-- Plans completed: 2
-- New capabilities: embedded MCP server, daemon MCP lifecycle wiring, `AGENT_BUS_MCP_URL` injection, `--mcp-port` worker flag, MCP startup visibility in banner and logs
-- Verification: targeted MCP/registry/worker suites green, full regression suite green (`npm test`, 116/116)
+Shipped 2026-03-16. 14/14 requirements satisfied. 116/116 tests. All phases archived to `.planning/milestones/v1.1-phases/`.
 
 ## Next Steps
 
-1. Start v1.2 planning (SDK/library mode, schema registry, dashboard, plugin system)
+1. `/gsd:new-milestone` — define v1.2 requirements and roadmap
