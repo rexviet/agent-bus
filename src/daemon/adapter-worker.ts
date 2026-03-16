@@ -84,6 +84,7 @@ export interface AdapterWorkerOptions {
   readonly deliveryStore: ReturnTypeOfCreateDeliveryStore;
   readonly deliveryService: DeliveryServiceShape;
   readonly dispatcher: Dispatcher;
+  readonly mcpUrl?: string;
   readonly defaultRetryDelayMs?: number;
   readonly monitor?: ProcessMonitorCallbacks;
   readonly verboseMonitorFactory?: (agentId: string) => ProcessMonitorCallbacks;
@@ -549,7 +550,8 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
             workingDirectory: workPackage.workspace.workingDirectory,
             workPackagePath: materializedRun.workPackagePath,
             resultFilePath: materializedRun.resultFilePath,
-            logFilePath: materializedRun.logFilePath
+            logFilePath: materializedRun.logFilePath,
+            ...(options.mcpUrl ? { mcpUrl: options.mcpUrl } : {})
           }),
           monitor: trackingMonitor
         });

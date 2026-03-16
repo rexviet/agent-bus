@@ -23,6 +23,7 @@ import type { ProcessMonitorCallbacks } from "../adapters/process-runner.js";
 import { createDeliveryService } from "./delivery-service.js";
 import { createDispatcher, type Dispatcher } from "./dispatcher.js";
 import type { DaemonLogger } from "./logger.js";
+import { createMcpServer, type McpServerHandle } from "./mcp-server.js";
 import { createOperatorService } from "./operator-service.js";
 import { publishEvent } from "./publish-event.js";
 import { createRecoveryScan } from "./recovery-scan.js";
@@ -42,6 +43,7 @@ export interface StartDaemonOptions {
   readonly runRecoveryScanOnStart?: boolean;
   readonly registerSignalHandlers?: boolean;
   readonly databasePath?: string;
+  readonly mcpPort?: number;
   readonly monitor?: ProcessMonitorCallbacks;
   readonly verboseMonitorFactory?: (agentId: string) => ProcessMonitorCallbacks;
   readonly logger?: DaemonLogger;
@@ -52,6 +54,7 @@ export interface AgentBusDaemon {
   readonly manifest: AgentBusManifest;
   readonly layout: RuntimeLayout;
   readonly databasePath: string;
+  readonly mcpUrl: string;
   publish(envelope: EventEnvelope): ReturnTypeOfCreateEventStore["insertEvent"] extends (
     ...args: never[]
   ) => infer Result
@@ -157,6 +160,26 @@ export async function startDaemon(
   const approvalStore = createApprovalStore(database);
   const deliveryStore = createDeliveryStore(database);
   const dispatcher = createDispatcher();
+  let mcpServer: McpServerHandle;
+
+  try {
+    mcpServer = await createMcpServer({
+      publishEvent: (envelope) =>
+        publishEvent({
+          database,
+          manifest,
+          runStore,
+          eventStore,
+          deliveryStore,
+          dispatcher,
+          envelope
+        }),
+      ...(options.mcpPort !== undefined ? { port: options.mcpPort } : {})
+    });
+  } catch (error) {
+    database.close();
+    throw error;
+  }
   const approvalService = createApprovalService({
     database,
     approvalStore,
@@ -180,6 +203,7 @@ export async function startDaemon(
     deliveryStore,
     deliveryService,
     dispatcher,
+    mcpUrl: mcpServer.url,
     ...(options.logger ? { logger: options.logger } : {}),
     ...(options.monitor ? { monitor: options.monitor } : {}),
     ...(options.verboseMonitorFactory
@@ -229,6 +253,7 @@ export async function startDaemon(
     stopped = true;
     recoveryScan.stop();
     signalCleanup();
+    await mcpServer.stop();
     database.close();
   };
 
@@ -241,6 +266,7 @@ export async function startDaemon(
     manifest,
     layout,
     databasePath,
+    mcpUrl: mcpServer.url,
 
     publish(envelope: EventEnvelope) {
       return publishEvent({
