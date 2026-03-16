@@ -728,8 +728,8 @@ test("worker defaults to sequential execution when --concurrency is omitted", as
         await waitForCondition(
           () => readDeliveryStatuses(databasePath).every((status) => status === "completed"),
           "both sequential deliveries to complete",
-          // Includes daemon startup + MCP startup overhead on CI runners.
-          8_000
+          // CI jitter can delay claim/start transitions for this sequential test.
+          12_000
         );
 
         const result = await stopWorker(worker);
