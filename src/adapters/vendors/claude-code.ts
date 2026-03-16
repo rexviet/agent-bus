@@ -1,5 +1,3 @@
-import * as path from "node:path";
-
 import type { PreparedAdapterCommand } from "../process-runner.js";
 
 export interface VendorAdapterCommandInput {
@@ -13,11 +11,37 @@ export interface VendorAdapterCommandInput {
   readonly identityFilePath?: string;
 }
 
-function buildCodexPrompt(input: VendorAdapterCommandInput): string {
+function stripPromptArgs(existingArgs: readonly string[]): string[] {
+  const normalizedArgs: string[] = [];
+
+  for (let index = 0; index < existingArgs.length; index += 1) {
+    const arg = existingArgs[index];
+
+    if (!arg) {
+      continue;
+    }
+
+    if (arg === "-p" || arg === "--print") {
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--print=")) {
+      continue;
+    }
+
+    normalizedArgs.push(arg);
+  }
+
+  return normalizedArgs;
+}
+
+function buildClaudeCodePrompt(input: VendorAdapterCommandInput): string {
   const parts = [
-    "You are running as a Codex worker inside Agent Bus.",
+    "You are running as a Claude Code worker inside Agent Bus.",
     `Read the work package JSON at "${input.workPackagePath}".`,
-    `Use "${input.workingDirectory}" as the repository working directory.`
+    `Use "${input.workingDirectory}" as the repository working directory.`,
+    "The work package is the source of truth for artifact inputs, follow-up events, and output expectations."
   ];
 
   if (input.identityFilePath) {
@@ -32,26 +56,16 @@ function buildCodexPrompt(input: VendorAdapterCommandInput): string {
   return parts.join(" ");
 }
 
-export function buildCodexCommand(
+export function buildClaudeCodeCommand(
   input: VendorAdapterCommandInput
 ): PreparedAdapterCommand {
-  if (input.executable !== "codex") {
-    throw new Error("Codex adapter requires the `codex` executable.");
+  if (input.executable !== "claude") {
+    throw new Error("Claude Code adapter requires the `claude` executable.");
   }
 
-  const args =
-    input.existingArgs[0] === "exec"
-      ? [...input.existingArgs]
-      : ["exec", ...input.existingArgs];
+  const args = stripPromptArgs(input.existingArgs);
 
-  if (!args.includes("--output-last-message") && !args.includes("-o")) {
-    args.push(
-      "--output-last-message",
-      path.join(path.dirname(input.resultFilePath), "codex-last-message.txt")
-    );
-  }
-
-  args.push(buildCodexPrompt(input));
+  args.push("-p", buildClaudeCodePrompt(input));
 
   return {
     command: input.executable,

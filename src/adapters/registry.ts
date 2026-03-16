@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import type { AgentBusManifest } from "../config/manifest-schema.js";
 import type { PreparedAdapterCommand } from "./process-runner.js";
+import { buildClaudeCodeCommand } from "./vendors/claude-code.js";
 import { buildCodexCommand } from "./vendors/codex.js";
 import { buildGeminiCommand } from "./vendors/gemini.js";
 import { buildOpenCodeCommand } from "./vendors/open-code.js";
@@ -11,7 +12,8 @@ import { buildOpenCodeCommand } from "./vendors/open-code.js";
 export const SupportedRuntimeFamilySchema = z.enum([
   "codex",
   "open-code",
-  "gemini"
+  "gemini",
+  "claude-code"
 ]);
 
 export type SupportedRuntimeFamily = z.infer<typeof SupportedRuntimeFamilySchema>;
@@ -48,6 +50,12 @@ const runtimeDefinitions = {
     family: "gemini",
     displayName: "Gemini CLI",
     executableCandidates: ["gemini"],
+    executionMode: "non_interactive_cli"
+  },
+  "claude-code": {
+    family: "claude-code",
+    displayName: "Claude Code",
+    executableCandidates: ["claude"],
     executionMode: "non_interactive_cli"
   }
 } as const satisfies Record<SupportedRuntimeFamily, RuntimeDefinition>;
@@ -165,5 +173,7 @@ export function buildAdapterCommand(
       return buildOpenCodeCommand(vendorInput);
     case "gemini":
       return buildGeminiCommand(vendorInput);
+    case "claude-code":
+      return buildClaudeCodeCommand(vendorInput);
   }
 }

@@ -24,6 +24,21 @@ test("buildCodexCommand produces a non-interactive codex exec invocation", () =>
   assert.ok(command.args.at(-1)?.includes("/repo/.agent-bus/state/run/result.json"));
 });
 
+test("buildCodexCommand includes identity file in prompt when provided", () => {
+  const command = buildCodexCommand({
+    executable: "codex",
+    existingArgs: [],
+    workingDirectory: "/repo",
+    workPackagePath: "/repo/work-package.json",
+    resultFilePath: "/repo/result.json",
+    logFilePath: "/repo/run.log",
+    baseEnvironment: {},
+    identityFilePath: "/repo/.agent/identities/developer.md"
+  });
+
+  assert.ok(command.args.at(-1)?.includes(".agent/identities/developer.md"));
+});
+
 test("buildCodexCommand rejects non-codex executables", () => {
   assert.throws(
     () =>
