@@ -9,3 +9,4 @@ dist/
 !.agent-bus/logs/.gitkeep
 
 examples/my-test-project/
+techlead-feedback.md
