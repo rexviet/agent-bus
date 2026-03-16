@@ -3,7 +3,7 @@
 ## Milestones
 
 - ✅ **v1.0 Core Runtime** — Phases 1-4 (shipped 2026-03-10)
-- 🚧 **v1.1 Production Hardening** — Phases 5-8 (in progress)
+- ✅ **v1.1 Production Hardening** — Phases 5-8 (shipped 2026-03-16)
 - ○ **v1.2 Developer Experience** — SDK/library mode, event schema registry, web dashboard, plugin system for adapters
 - ○ **v1.3 Scale & Ecosystem** — PostgreSQL backend option, distributed worker support, adapter marketplace, multi-repo orchestration
 
@@ -16,7 +16,7 @@ Phases 1-4 delivered the core event-driven orchestration runtime: manifest-drive
 
 </details>
 
-### 🚧 v1.1 Production Hardening (In Progress)
+### ✅ v1.1 Production Hardening (Shipped 2026-03-16)
 
 **Milestone Goal:** Harden the runtime for real-world unattended use — agents cannot hang indefinitely, daemon secrets do not leak, delivery processing scales to concurrent work, and agents can publish follow-up events directly via an embedded MCP server.
 
@@ -78,8 +78,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 08-01-PLAN.md — Install MCP SDK, create mcp-server.ts with publish_event tool + tests
-- [ ] 08-02-PLAN.md — Wire MCP server into daemon lifecycle, CLI flag, env var injection, banner
+- [x] 08-01-PLAN.md — Install MCP SDK, create mcp-server.ts with publish_event tool + tests ✓ COMPLETE
+- [x] 08-02-PLAN.md — Wire MCP server into daemon lifecycle, CLI flag, env var injection, banner ✓ COMPLETE
 
 ## Progress
 
@@ -90,4 +90,4 @@ Plans:
 | 5. Foundation Safety | v1.1 | 3/3 | ✅ COMPLETE | 2026-03-14 |
 | 6. Structured Logging | v1.1 | 2/2 | ✅ COMPLETE | 2026-03-15 |
 | 7. Concurrent Workers | v1.1 | 2/2 | ✅ COMPLETE | 2026-03-15 |
-| 8. Embedded MCP Server | v1.1 | 0/2 | Not started | - |
+| 8. Embedded MCP Server | v1.1 | 2/2 | ✅ COMPLETE | 2026-03-16 |
