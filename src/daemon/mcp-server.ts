@@ -20,6 +20,39 @@ export interface CreateMcpServerOptions {
   readonly port?: number;
 }
 
+function createRequestScopedMcpServer(
+  publishEvent: CreateMcpServerOptions["publishEvent"]
+): McpServer {
+  const mcpServer = new McpServer({ name: "agent-bus", version: "1" });
+
+  mcpServer.registerTool(
+    "publish_event",
+    {
+      description: "Publish a follow-up event into Agent Bus during agent execution.",
+      inputSchema: EventEnvelopeSchema.shape
+    },
+    async (args) => {
+      try {
+        const envelope = EventEnvelopeSchema.parse(args);
+        publishEvent(envelope);
+
+        return {
+          content: [{ type: "text" as const, text: "ok" }]
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: message }]
+        };
+      }
+    }
+  );
+
+  return mcpServer;
+}
+
 function listenHttpServer(
   server: http.Server,
   options: Pick<CreateMcpServerOptions, "port">
@@ -63,33 +96,6 @@ function closeHttpServer(server: http.Server): Promise<void> {
 export async function createMcpServer(
   options: CreateMcpServerOptions
 ): Promise<McpServerHandle> {
-  const mcpServer = new McpServer({ name: "agent-bus", version: "1" });
-
-  mcpServer.registerTool(
-    "publish_event",
-    {
-      description: "Publish a follow-up event into Agent Bus during agent execution.",
-      inputSchema: EventEnvelopeSchema.shape
-    },
-    async (args) => {
-      try {
-        const envelope = EventEnvelopeSchema.parse(args);
-        options.publishEvent(envelope);
-
-        return {
-          content: [{ type: "text" as const, text: "ok" }]
-        };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown error";
-
-        return {
-          isError: true,
-          content: [{ type: "text" as const, text: message }]
-        };
-      }
-    }
-  );
-
   const httpServer = http.createServer(async (request, response) => {
     if (request.method !== "POST") {
       response.statusCode = 405;
@@ -105,9 +111,16 @@ export async function createMcpServer(
       return;
     }
 
-    const transport = new StreamableHTTPServerTransport();
+    // The SDK docs recommend `sessionIdGenerator: undefined` for explicit stateless mode.
+    // With exactOptionalPropertyTypes enabled, this needs a narrow cast.
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined as unknown as () => string
+    });
+    const mcpServer = createRequestScopedMcpServer(options.publishEvent);
 
     try {
+      // SDK transport types are structurally compatible at runtime, but
+      // exactOptionalPropertyTypes in this project makes the static types diverge.
       await mcpServer.connect(transport as unknown as Transport);
       await transport.handleRequest(request, response);
     } catch (error) {
@@ -117,6 +130,7 @@ export async function createMcpServer(
       }
     } finally {
       await transport.close();
+      await mcpServer.close();
     }
   });
 
@@ -127,12 +141,10 @@ export async function createMcpServer(
     return {
       url,
       async stop() {
-        await mcpServer.close();
         await closeHttpServer(httpServer);
       }
     };
   } catch (error) {
-    await mcpServer.close();
     await closeHttpServer(httpServer);
     throw error;
   }

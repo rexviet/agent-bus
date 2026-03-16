@@ -180,6 +180,7 @@ export async function startDaemon(
     database.close();
     throw error;
   }
+  options.logger?.info({ event: "mcp.started", mcpUrl: mcpServer.url });
   const approvalService = createApprovalService({
     database,
     approvalStore,

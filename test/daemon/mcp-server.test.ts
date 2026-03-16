@@ -34,6 +34,8 @@ async function withMcpClient<T>(
   const transport = new StreamableHTTPClientTransport(new URL(url));
   const client = new Client({ name: "agent-bus-test-client", version: "1" });
 
+  // The SDK transport is runtime-compatible, but exactOptionalPropertyTypes
+  // causes a static type mismatch in this project configuration.
   await client.connect(transport as unknown as Transport);
 
   try {
@@ -261,6 +263,35 @@ test("multiple sequential MCP requests are handled successfully", async () => {
     );
 
     assert.deepEqual(capturedRunIds, ["run-seq-1", "run-seq-2"]);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("MCP server handles sustained sequential publish_event calls", async () => {
+  let callCount = 0;
+  const server = await createMcpServer({
+    publishEvent: () => {
+      callCount += 1;
+    }
+  });
+
+  try {
+    for (let index = 0; index < 60; index += 1) {
+      await withMcpClient(server.url, (client) =>
+        client.callTool({
+          name: "publish_event",
+          arguments: buildValidEnvelope({
+            eventId: `550e8400-e29b-41d4-a716-44665544${String(900 + index).padStart(4, "0")}`,
+            runId: `run-load-${index}`,
+            correlationId: `run-load-${index}`,
+            dedupeKey: `dedupe-load-${index}`
+          })
+        })
+      );
+    }
+
+    assert.equal(callCount, 60);
   } finally {
     await server.stop();
   }

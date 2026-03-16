@@ -660,6 +660,7 @@ test("worker runs deliveries concurrently when --concurrency is greater than one
         await waitForCondition(
           () => readDeliveryStatuses(databasePath).every((status) => status === "completed"),
           "both concurrent deliveries to complete",
+          // Includes daemon startup + MCP startup overhead on CI runners.
           8_000
         );
 
@@ -727,6 +728,7 @@ test("worker defaults to sequential execution when --concurrency is omitted", as
         await waitForCondition(
           () => readDeliveryStatuses(databasePath).every((status) => status === "completed"),
           "both sequential deliveries to complete",
+          // Includes daemon startup + MCP startup overhead on CI runners.
           8_000
         );
 

@@ -341,7 +341,6 @@ export async function runWorkerCommand(
     mcpUrl: daemon.mcpUrl,
     once
   });
-  logger.info({ event: "mcp.started", mcpUrl: daemon.mcpUrl });
 
   try {
     const waitForNextPoll = () =>
