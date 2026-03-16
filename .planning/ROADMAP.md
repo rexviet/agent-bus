@@ -75,7 +75,11 @@ Plans:
   2. Agent receives `AGENT_BUS_MCP_URL` env var in its work package and can use it to reach the MCP server
   3. Agent can call the `publish_event` MCP tool during execution and the event appears in the event store immediately
   4. An agent identity file that calls `publish_event` via MCP successfully publishes follow-up events without writing an `events` array in the result envelope
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 08-01-PLAN.md — Install MCP SDK, create mcp-server.ts with publish_event tool + tests
+- [ ] 08-02-PLAN.md — Wire MCP server into daemon lifecycle, CLI flag, env var injection, banner
 
 ## Progress
 
@@ -86,4 +90,4 @@ Plans:
 | 5. Foundation Safety | v1.1 | 3/3 | ✅ COMPLETE | 2026-03-14 |
 | 6. Structured Logging | v1.1 | 2/2 | ✅ COMPLETE | 2026-03-15 |
 | 7. Concurrent Workers | v1.1 | 2/2 | ✅ COMPLETE | 2026-03-15 |
-| 8. Embedded MCP Server | v1.1 | 0/? | Not started | - |
+| 8. Embedded MCP Server | v1.1 | 0/2 | Not started | - |
