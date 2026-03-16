@@ -31,6 +31,7 @@ export interface BuildAdapterCommandInput {
   readonly workPackagePath: string;
   readonly resultFilePath: string;
   readonly logFilePath: string;
+  readonly mcpUrl?: string;
 }
 
 const runtimeDefinitions = {
@@ -118,7 +119,8 @@ function buildBaseEnvironment(
     AGENT_BUS_RUNTIME: input.agent.runtime,
     AGENT_BUS_WORK_PACKAGE_PATH: input.workPackagePath,
     AGENT_BUS_RESULT_FILE_PATH: input.resultFilePath,
-    AGENT_BUS_LOG_FILE_PATH: input.logFilePath
+    AGENT_BUS_LOG_FILE_PATH: input.logFilePath,
+    ...(input.mcpUrl ? { AGENT_BUS_MCP_URL: input.mcpUrl } : {})
   };
 }
 

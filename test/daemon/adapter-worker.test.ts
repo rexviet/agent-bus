@@ -573,7 +573,9 @@ artifactConventions: []
         assert.ok(execution);
         assert.equal(execution.status, "success");
 
-        const entries = capture.readEntries();
+        const entries = capture
+          .readEntries()
+          .filter((entry) => entry.event !== "mcp.started");
 
         assert.deepEqual(
           entries.map((entry) => entry.event),
@@ -647,7 +649,9 @@ artifactConventions: []
         assert.ok(execution);
         assert.equal(execution.status, "retryable_error");
 
-        const entries = capture.readEntries();
+        const entries = capture
+          .readEntries()
+          .filter((entry) => entry.event !== "mcp.started");
 
         assert.deepEqual(
           entries.map((entry) => entry.event),
@@ -723,7 +727,9 @@ artifactConventions: []
         assert.ok(execution);
         assert.equal(execution.status, "fatal_error");
 
-        const entries = capture.readEntries();
+        const entries = capture
+          .readEntries()
+          .filter((entry) => entry.event !== "mcp.started");
 
         assert.deepEqual(
           entries.map((entry) => entry.event),
@@ -801,7 +807,9 @@ artifactConventions: []
         assert.equal(execution.status, "process_error");
         assert.equal(execution.delivery.status, "dead_letter");
 
-        const entries = capture.readEntries();
+        const entries = capture
+          .readEntries()
+          .filter((entry) => entry.event !== "mcp.started");
 
         assert.deepEqual(
           entries.map((entry) => entry.event),

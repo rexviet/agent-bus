@@ -36,6 +36,7 @@ interface ParsedDaemonLogLine {
   readonly agentId?: string;
   readonly runId?: string;
   readonly workerId?: string;
+  readonly mcpUrl?: string;
   readonly drainTimeoutMs?: number;
   readonly inFlightCount?: number;
 }
@@ -336,6 +337,7 @@ test("worker --once claims and executes one ready delivery", async () => {
     assert.match(result.stdout, /Worker started worker-cli-once/);
     assert.match(result.stdout, /concurrency: 1/);
     assert.match(result.stdout, /drainTimeoutMs: 30000/);
+    assert.match(result.stdout, /mcp: http:\/\/127\.0\.0\.1:\d+\/mcp/);
     assert.match(result.stdout, /status: success/);
     assert.match(result.stdout, /deliveryStatus: completed/);
     assert.match(result.stdout, /Worker stopped worker-cli-once/);
@@ -392,6 +394,10 @@ test("worker validates numeric options and required option values", async () => 
       ["worker", "--log-level", "--once"],
       repositoryRoot
     );
+    const invalidMcpPort = await runCli(
+      ["worker", "--mcp-port", "0"],
+      repositoryRoot
+    );
 
     assert.equal(invalidLease.exitCode, 1);
     assert.match(invalidLease.stderr, /--lease-duration-ms must be an integer >= 1/);
@@ -417,6 +423,9 @@ test("worker validates numeric options and required option values", async () => 
     assert.equal(missingLogLevelValue.exitCode, 1);
     assert.match(missingLogLevelValue.stderr, /Worker option --log-level requires a value/);
     assert.match(missingLogLevelValue.stderr, /--log-level level/);
+
+    assert.equal(invalidMcpPort.exitCode, 1);
+    assert.match(invalidMcpPort.stderr, /--mcp-port must be an integer >= 1/);
   });
 });
 
@@ -442,16 +451,68 @@ test("worker emits parseable NDJSON lifecycle logs to stderr", async () => {
 
     assert.ok(logLines.length >= 3, `expected structured log lines, got: ${result.stderr}`);
     assert.ok(logLines.some((line) => line.event === "delivery.claimed"));
+    assert.ok(logLines.some((line) => line.event === "mcp.started"));
+    assert.ok(
+      logLines.some((line) => line.event === "mcp.started" && typeof line.mcpUrl === "string")
+    );
 
     for (const line of logLines) {
       assert.equal(typeof line.level, "number");
       assert.equal(typeof line.timestamp, "string");
-      assert.equal(typeof line.deliveryId, "string");
-      assert.equal(typeof line.agentId, "string");
-      assert.equal(typeof line.runId, "string");
-      assert.equal(typeof line.workerId, "string");
+      if (line.deliveryId !== undefined) {
+        assert.equal(typeof line.deliveryId, "string");
+      }
+      if (line.agentId !== undefined) {
+        assert.equal(typeof line.agentId, "string");
+      }
+      if (line.runId !== undefined) {
+        assert.equal(typeof line.runId, "string");
+      }
+      if (line.workerId !== undefined) {
+        assert.equal(typeof line.workerId, "string");
+      }
     }
   });
+});
+
+test("worker forwards --mcp-port and prints startup mcp URL", async () => {
+  const stdout = createCaptureStream();
+  const stderr = createCaptureStream();
+  let capturedMcpPort: number | undefined;
+
+  const exitCode = await runWorkerCommand(
+    ["--once", "--mcp-port", "12345", "--worker-id", "worker-mcp-port"],
+    {
+      cwd: process.cwd(),
+      stdout: stdout.stream,
+      stderr: stderr.stream
+    },
+    {
+      startDaemon: async (options) => {
+        capturedMcpPort = options.mcpPort;
+
+        return ({
+          mcpUrl: "http://127.0.0.1:12345/mcp",
+          runWorkerIteration() {
+            return Promise.resolve(null);
+          },
+          getInFlightDeliveryCount() {
+            return 0;
+          },
+          forceKillInFlight() {
+            // no-op
+          },
+          async stop() {
+            // no-op
+          }
+        }) as never;
+      }
+    }
+  );
+
+  assert.equal(exitCode, 0);
+  assert.equal(capturedMcpPort, 12345);
+  assert.match(stdout.read(), /mcp: http:\/\/127\.0\.0\.1:12345\/mcp/);
 });
 
 test("worker defaults log level to info when --log-level is omitted", async () => {
@@ -518,12 +579,16 @@ test("worker keeps other slots running when one slot iteration fails", async () 
     {
       createDaemonLogger: () =>
         ({
+          info() {
+            // no-op
+          },
           warn() {
             // no-op
           }
         }) as unknown as DaemonLogger,
       startDaemon: async () =>
         ({
+          mcpUrl: "http://127.0.0.1:9999/mcp",
           runWorkerIteration(workerId: string) {
             seenWorkerIds.push(workerId);
 
@@ -594,7 +659,9 @@ test("worker runs deliveries concurrently when --concurrency is greater than one
         const databasePath = databasePathFor(repositoryRoot);
         await waitForCondition(
           () => readDeliveryStatuses(databasePath).every((status) => status === "completed"),
-          "both concurrent deliveries to complete"
+          "both concurrent deliveries to complete",
+          // Includes daemon startup + MCP startup overhead on CI runners.
+          8_000
         );
 
         const result = await stopWorker(worker);
@@ -660,7 +727,9 @@ test("worker defaults to sequential execution when --concurrency is omitted", as
         const databasePath = databasePathFor(repositoryRoot);
         await waitForCondition(
           () => readDeliveryStatuses(databasePath).every((status) => status === "completed"),
-          "both sequential deliveries to complete"
+          "both sequential deliveries to complete",
+          // Includes daemon startup + MCP startup overhead on CI runners.
+          8_000
         );
 
         const result = await stopWorker(worker);
