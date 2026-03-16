@@ -1,11 +1,11 @@
-<!-- AUTO-GENERATED from .planning/ROADMAP.md by scripts/sync-planning-to-gsd.mjs. source-sha256: 51f6562a8ff4df3d9d7deac160f546361e79b70ffe2394936eabf9d382c1a90f. Edit the source file, not this projection. -->
+<!-- AUTO-GENERATED from .planning/ROADMAP.md by scripts/sync-planning-to-gsd.mjs. source-sha256: 6190e23564c742dc2451723954ba17c3dc3662f028ba831d7f016cc0bdfe0e3b. Edit the source file, not this projection. -->
 
 # Roadmap: Agent Bus
 
 ## Milestones
 
 - ✅ **v1.0 Core Runtime** — Phases 1-4 (shipped 2026-03-10)
-- 🚧 **v1.1 Production Hardening** — Phases 5-8 (in progress)
+- ✅ **v1.1 Production Hardening** — Phases 5-8 (shipped 2026-03-16)
 - ○ **v1.2 Developer Experience** — SDK/library mode, event schema registry, web dashboard, plugin system for adapters
 - ○ **v1.3 Scale & Ecosystem** — PostgreSQL backend option, distributed worker support, adapter marketplace, multi-repo orchestration
 
@@ -18,7 +18,7 @@ Phases 1-4 delivered the core event-driven orchestration runtime: manifest-drive
 
 </details>
 
-### 🚧 v1.1 Production Hardening (In Progress)
+### ✅ v1.1 Production Hardening (Shipped 2026-03-16)
 
 **Milestone Goal:** Harden the runtime for real-world unattended use — agents cannot hang indefinitely, daemon secrets do not leak, delivery processing scales to concurrent work, and agents can publish follow-up events directly via an embedded MCP server.
 
@@ -77,7 +77,11 @@ Plans:
   2. Agent receives `AGENT_BUS_MCP_URL` env var in its work package and can use it to reach the MCP server
   3. Agent can call the `publish_event` MCP tool during execution and the event appears in the event store immediately
   4. An agent identity file that calls `publish_event` via MCP successfully publishes follow-up events without writing an `events` array in the result envelope
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [x] 08-01-PLAN.md — Install MCP SDK, create mcp-server.ts with publish_event tool + tests ✓ COMPLETE
+- [x] 08-02-PLAN.md — Wire MCP server into daemon lifecycle, CLI flag, env var injection, banner ✓ COMPLETE
 
 ## Progress
 
@@ -88,4 +92,4 @@ Plans:
 | 5. Foundation Safety | v1.1 | 3/3 | ✅ COMPLETE | 2026-03-14 |
 | 6. Structured Logging | v1.1 | 2/2 | ✅ COMPLETE | 2026-03-15 |
 | 7. Concurrent Workers | v1.1 | 2/2 | ✅ COMPLETE | 2026-03-15 |
-| 8. Embedded MCP Server | v1.1 | 0/? | Not started | - |
+| 8. Embedded MCP Server | v1.1 | 2/2 | ✅ COMPLETE | 2026-03-16 |
