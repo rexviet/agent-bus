@@ -259,6 +259,7 @@ export function writeWorkerStartedText(
     readonly concurrency: number;
     readonly drainTimeoutMs: number;
     readonly retryDelayMs?: number;
+    readonly mcpUrl?: string;
     readonly once: boolean;
   }
 ): void {
@@ -272,6 +273,10 @@ export function writeWorkerStartedText(
 
   if (options.retryDelayMs !== undefined) {
     writeLine(stream, `retryDelayMs: ${options.retryDelayMs}`);
+  }
+
+  if (options.mcpUrl !== undefined) {
+    writeLine(stream, `mcp: ${options.mcpUrl}`);
   }
 }
 

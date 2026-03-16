@@ -26,7 +26,7 @@ export interface WorkerCommandIO {
 }
 
 const WORKER_HELP_TEXT = `Worker command:
-  agent-bus worker [--config path] [--worker-id id] [--lease-duration-ms N] [--poll-interval-ms N] [--retry-delay-ms N] [--concurrency N] [--drain-timeout-ms N] [--log-level level] [--once] [--verbose]
+  agent-bus worker [--config path] [--worker-id id] [--lease-duration-ms N] [--poll-interval-ms N] [--retry-delay-ms N] [--concurrency N] [--drain-timeout-ms N] [--mcp-port N] [--log-level level] [--once] [--verbose]
 `;
 
 interface RunWorkerCommandDependencies {
@@ -206,6 +206,7 @@ export async function runWorkerCommand(
     "--retry-delay-ms",
     "--concurrency",
     "--drain-timeout-ms",
+    "--mcp-port",
     "--log-level"
   ]);
   const flagsWithoutValues = new Set(["--once", "--verbose"]);
@@ -254,6 +255,7 @@ export async function runWorkerCommand(
   let retryDelayMs: number | undefined;
   let concurrency: number;
   let drainTimeoutMs: number;
+  let mcpPort: number | undefined;
   let logLevel: DaemonLogLevel;
 
   try {
@@ -287,6 +289,12 @@ export async function runWorkerCommand(
         "--drain-timeout-ms",
         0
       ) ?? 30_000;
+    mcpPort =
+      parseIntegerAtLeast(
+        readOptionValue(args, "--mcp-port"),
+        "--mcp-port",
+        1
+      ) ?? undefined;
     const rawLogLevel = readOptionValue(args, "--log-level") ?? "info";
 
     if (!VALID_LOG_LEVELS.has(rawLogLevel as DaemonLogLevel)) {
@@ -310,6 +318,7 @@ export async function runWorkerCommand(
     repositoryRoot: io.cwd,
     registerSignalHandlers: false,
     logger,
+    ...(mcpPort !== undefined ? { mcpPort } : {}),
     ...(verboseMonitorFactory ? { verboseMonitorFactory } : {})
   });
   const stopController = createStopController();
@@ -329,8 +338,10 @@ export async function runWorkerCommand(
     concurrency,
     drainTimeoutMs,
     ...(retryDelayMs !== undefined ? { retryDelayMs } : {}),
+    mcpUrl: daemon.mcpUrl,
     once
   });
+  logger.info({ event: "mcp.started", mcpUrl: daemon.mcpUrl });
 
   try {
     const waitForNextPoll = () =>
