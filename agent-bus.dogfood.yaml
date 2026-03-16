@@ -1,0 +1,43 @@
+version: 1
+
+workspace:
+  artifactsDir: .agent-bus/artifacts
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+
+agents:
+  - id: developer_codex
+    runtime: codex
+    description: Developer agent — syncs planning to GSD then executes phase implementation via GSD workflows.
+    identityFile: .agent/identities/developer.md
+    command:
+      - codex
+      - exec
+      - --model
+      - gpt-5.3-codex
+      - --reasoning
+      - medium
+    environment:
+      CODEX_QUIET: "1"
+
+  - id: reviewer_claude
+    runtime: claude-code
+    description: Code reviewer running Claude Opus via Claude Code CLI.
+    identityFile: .agent/identities/reviewer.md
+    command:
+      - claude
+      - --model
+      - claude-opus-4-6
+
+subscriptions:
+  - agentId: developer_codex
+    topic: plan_done
+    description: Sync planning docs to GSD and execute the phase after Claude finishes planning.
+
+  - agentId: reviewer_claude
+    topic: pr_ready
+    description: Review the pull request after Codex creates it.
+
+approvalGates: []
+
+artifactConventions: []

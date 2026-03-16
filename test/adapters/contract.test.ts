@@ -168,5 +168,7 @@ test("runtime registry exposes stable runtime identities and executable aliases"
   assert.equal(guessRuntimeFamilyFromExecutable("opencode"), "open-code");
   assert.equal(assertSupportedRuntimeFamily("gemini").displayName, "Gemini CLI");
   assert.equal(guessRuntimeFamilyFromExecutable("gemini"), "gemini");
-  assert.throws(() => assertSupportedRuntimeFamily("claude-code"), /Unsupported runtime family/);
+  assert.equal(assertSupportedRuntimeFamily("claude-code").displayName, "Claude Code");
+  assert.equal(guessRuntimeFamilyFromExecutable("claude"), "claude-code");
+  assert.throws(() => assertSupportedRuntimeFamily("unknown-runtime"), /Unsupported runtime family/);
 });
