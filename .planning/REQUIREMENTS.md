@@ -16,22 +16,22 @@ Requirements for Production Hardening milestone. Each maps to roadmap phases.
 
 ### Logging
 
-- [ ] **LOG-01**: Daemon writes structured NDJSON log lines to stderr for all delivery lifecycle events
-- [ ] **LOG-02**: Each log line includes correlation fields: `deliveryId`, `agentId`, `runId`, `level`, `timestamp`
-- [ ] **LOG-03**: Operator can pipe daemon stderr to `jq`/`grep` to filter by deliveryId or agentId without additional tooling
+- [x] **LOG-01**: Daemon writes structured NDJSON log lines to stderr for all delivery lifecycle events ✓ COMPLETE (Plan 06-01)
+- [x] **LOG-02**: Each log line includes correlation fields: `deliveryId`, `agentId`, `runId`, `level`, `timestamp` ✓ COMPLETE (Plan 06-01)
+- [x] **LOG-03**: Operator can pipe daemon stderr to `jq`/`grep` to filter by deliveryId or agentId without additional tooling ✓ COMPLETE (Plan 06-02)
 
 ### Workers
 
-- [ ] **WORKER-01**: Operator can start daemon with `--concurrency N` flag to run up to N deliveries in parallel
-- [ ] **WORKER-02**: Daemon defaults to concurrency 1, preserving backward-compatible behavior
-- [ ] **WORKER-03**: Daemon drains all in-flight deliveries to completion before shutting down
+- [x] **WORKER-01**: Operator can start daemon with `--concurrency N` flag to run up to N deliveries in parallel ✓ COMPLETE (Plans 07-01, 07-02)
+- [x] **WORKER-02**: Daemon defaults to concurrency 1, preserving backward-compatible behavior ✓ COMPLETE (Plans 07-01, 07-02)
+- [x] **WORKER-03**: Daemon drains all in-flight deliveries to completion before shutting down ✓ COMPLETE (Plan 07-02)
 
 ### MCP Server
 
-- [ ] **MCP-01**: Daemon starts an embedded MCP HTTP server on localhost when the daemon starts
-- [ ] **MCP-02**: Agent receives `AGENT_BUS_MCP_URL` env var in work package pointing to the MCP server
-- [ ] **MCP-03**: Agent can call `publish_event` MCP tool to publish follow-up events during execution
-- [ ] **MCP-04**: Agent identity file can use `publish_event` MCP tool instead of writing `events` in the result envelope
+- [x] **MCP-01**: Daemon starts an embedded MCP HTTP server on localhost when the daemon starts ✓ COMPLETE (Plan 08-01)
+- [x] **MCP-02**: Agent receives `AGENT_BUS_MCP_URL` env var in work package pointing to the MCP server ✓ COMPLETE (Plan 08-02)
+- [x] **MCP-03**: Agent can call `publish_event` MCP tool to publish follow-up events during execution ✓ COMPLETE (Plan 08-01)
+- [x] **MCP-04**: Agent identity file can use `publish_event` MCP tool instead of writing `events` in the result envelope ✓ COMPLETE (Plan 08-02)
 
 ## v2 Requirements
 
@@ -74,16 +74,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TIMEOUT-02 | Phase 5 | Complete (2026-03-14) |
 | TIMEOUT-03 | Phase 5 | Complete (2026-03-14) |
 | TIMEOUT-04 | Phase 5 | Complete (2026-03-14) |
-| LOG-01 | Phase 6 | Pending |
-| LOG-02 | Phase 6 | Pending |
-| LOG-03 | Phase 6 | Pending |
-| WORKER-01 | Phase 7 | Pending |
-| WORKER-02 | Phase 7 | Pending |
-| WORKER-03 | Phase 7 | Pending |
-| MCP-01 | Phase 8 | Pending |
-| MCP-02 | Phase 8 | Pending |
-| MCP-03 | Phase 8 | Pending |
-| MCP-04 | Phase 8 | Pending |
+| LOG-01 | Phase 6 | Complete (2026-03-15) |
+| LOG-02 | Phase 6 | Complete (2026-03-15) |
+| LOG-03 | Phase 6 | Complete (2026-03-15) |
+| WORKER-01 | Phase 7 | Complete (2026-03-15) |
+| WORKER-02 | Phase 7 | Complete (2026-03-15) |
+| WORKER-03 | Phase 7 | Complete (2026-03-15) |
+| MCP-01 | Phase 8 | Complete (2026-03-16) |
+| MCP-02 | Phase 8 | Complete (2026-03-16) |
+| MCP-03 | Phase 8 | Complete (2026-03-16) |
+| MCP-04 | Phase 8 | Complete (2026-03-16) |
 
 **Coverage:**
 - v1.1 requirements: 14 total
@@ -92,4 +92,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-03-14*
-*Last updated: 2026-03-14 after roadmap creation (v1.1 phases 5-8)*
+*Last updated: 2026-03-16 after milestone audit (all v1.1 requirements marked complete)*
