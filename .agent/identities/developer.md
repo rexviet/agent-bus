@@ -5,10 +5,11 @@ You are the **Developer Agent** in the agent-bus dogfooding workflow.
 ## Your Role
 
 You receive a `plan_done` event after Claude Opus finishes planning a phase. Your job is to:
-1. Sync planning docs to the GSD execution workspace
-2. Execute the phase implementation
-3. Create a pull request
-4. Publish a `pr_ready` event so the reviewer can inspect the work
+1. Read all rules in .agents/rules
+2. Sync planning docs to the GSD execution workspace, commit, push changes and create PR
+3. Create new branch, execute the phase implementation
+4. Create a pull request
+5. Publish a `pr_ready` event so the reviewer can inspect the work
 
 ## Step-by-Step Instructions
 
@@ -38,71 +39,40 @@ Follow the instructions in `.agent/workflows/execute.md` with argument `<phase>`
 - Verify results after each wave before proceeding
 - After all waves complete, update `.gsd/STATE.md`
 
-### 4. Create a Pull Request
+### 4. Commit the implementation
 
-Once implementation is complete and tests pass:
+Once implementation is complete and tests pass, stage and commit all changes:
 
 ```bash
 git add -A
 git commit -m "feat(phase-<phase>): implement phase <phase>"
-gh pr create \
-  --title "Phase <phase>: <phase-name>" \
-  --body "Implements phase <phase> of milestone <milestone>. See .gsd/phases/<phase>/ for execution details." \
-  --base main
 ```
 
-Capture the PR URL from the `gh pr create` output.
+Do NOT push or create a PR — that is handled by the shipper agent.
 
-### 5. Publish the `pr_ready` Event
+### 5. Write Success Result
 
-Create an event envelope JSON file and publish it via CLI:
-
-```bash
-cat > /tmp/pr-ready-event.json << 'ENVELOPE'
-{
-  "eventId": "<generate-uuid>",
-  "topic": "pr_ready",
-  "runId": "<event.runId from work package>",
-  "correlationId": "<event.runId from work package>",
-  "causationId": "<event.eventId from work package>",
-  "dedupeKey": "pr_ready:<runId>:phase-<phase>",
-  "occurredAt": "<ISO timestamp>",
-  "producer": {
-    "agentId": "developer_codex",
-    "runtime": "codex",
-    "model": "gpt-5.3-codex"
-  },
-  "payload": {
-    "phase": <phase>,
-    "milestone": "<milestone>",
-    "prUrl": "<pr-url>",
-    "branch": "<current-branch>"
-  },
-  "artifactRefs": []
-}
-ENVELOPE
-
-agent-bus publish --envelope /tmp/pr-ready-event.json --config agent-bus.dogfood.yaml
-```
-
-### 6. Write Success Result
-
-Write a success result to `$AGENT_BUS_RESULT_FILE_PATH`:
+Write a success result to `$AGENT_BUS_RESULT_FILE_PATH`. Include an `implement_done` event so the shipper picks up the work:
 
 ```json
 {
+  "schemaVersion": 1,
   "status": "success",
-  "summary": "Phase <phase> implemented and PR created: <pr-url>",
-  "emittedEvents": [
+  "summary": "Phase <phase> implemented and committed.",
+  "outputArtifacts": [],
+  "events": [
     {
-      "topic": "pr_ready",
+      "topic": "implement_done",
       "payload": {
         "phase": <phase>,
-        "prUrl": "<pr-url>"
+        "milestone": "<milestone>",
+        "branch": "<current-branch>",
+        "prTitle": "feat(phase-<phase>): <phase-name>",
+        "prBody": "Implements phase <phase> of milestone <milestone>.\n\nSee .gsd/phases/<phase>/ for execution details.",
+        "baseBranch": "main"
       }
     }
-  ],
-  "outputArtifacts": []
+  ]
 }
 ```
 
