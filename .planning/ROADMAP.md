@@ -30,7 +30,7 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 
 </details>
 
-### 🚧 v1.2 Developer Experience (In Progress)
+### v1.2 Developer Experience (In Progress)
 
 **Milestone Goal:** Make Agent Bus safer and more observable — event schema validation, web dashboard for real-time visibility, and legacy cleanup of the `events[]` result envelope pattern superseded by MCP.
 
@@ -50,7 +50,11 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
   3. Pending approval queue is visible on the dashboard — operator can see what is waiting for `agent-bus approve` without running the CLI
   4. Dead-letter and failure queue is visible on the dashboard with agent ID, error summary, and retry count
   5. SSE connection drops (browser close, network interrupt) do not prevent `daemon.stop()` from resolving — shutdown completes cleanly
-**Plans**: TBD
+**Plans:** 3 plans
+Plans:
+- [ ] 09-01-PLAN.md — Hono deps, dispatcher EventEmitter, dashboard server with API routes
+- [ ] 09-02-PLAN.md — SSE endpoint with shutdown safety, daemon integration, CLI flag
+- [ ] 09-03-PLAN.md — Dashboard HTML/CSS/JS template with dark terminal aesthetic and live updates
 
 ### Phase 10: Event Schema Registry
 **Goal**: Operators can declare per-topic payload schemas and catch mismatches at publish time, not deep in failed agent executions
@@ -78,11 +82,11 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 1–4. Core Runtime | v1.0 | 8/8 | ✅ COMPLETE | 2026-03-10 |
-| 5. Foundation Safety | v1.1 | 3/3 | ✅ COMPLETE | 2026-03-14 |
-| 6. Structured Logging | v1.1 | 2/2 | ✅ COMPLETE | 2026-03-15 |
-| 7. Concurrent Workers | v1.1 | 2/2 | ✅ COMPLETE | 2026-03-15 |
-| 8. Embedded MCP Server | v1.1 | 2/2 | ✅ COMPLETE | 2026-03-16 |
-| 9. Web Dashboard | v1.2 | 0/TBD | Not started | - |
+| 1-4. Core Runtime | v1.0 | 8/8 | COMPLETE | 2026-03-10 |
+| 5. Foundation Safety | v1.1 | 3/3 | COMPLETE | 2026-03-14 |
+| 6. Structured Logging | v1.1 | 2/2 | COMPLETE | 2026-03-15 |
+| 7. Concurrent Workers | v1.1 | 2/2 | COMPLETE | 2026-03-15 |
+| 8. Embedded MCP Server | v1.1 | 2/2 | COMPLETE | 2026-03-16 |
+| 9. Web Dashboard | v1.2 | 0/3 | Planned | - |
 | 10. Event Schema Registry | v1.2 | 0/TBD | Not started | - |
 | 11. Deprecation | v1.2 | 0/TBD | Not started | - |
