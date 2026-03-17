@@ -2,6 +2,10 @@ import * as path from "node:path";
 
 import type { AgentBusManifest } from "../config/manifest-schema.js";
 import { loadManifest } from "../config/load-manifest.js";
+import {
+  SchemaRegistry,
+  type SchemaDeclaration
+} from "../config/schema-registry.js";
 import type { EventEnvelope } from "../domain/event-envelope.js";
 import { ensureRuntimeLayout, type RuntimeLayout } from "../shared/runtime-layout.js";
 import { createApprovalStore } from "../storage/approval-store.js";
@@ -61,6 +65,7 @@ export interface AgentBusDaemon {
   readonly databasePath: string;
   readonly mcpUrl: string;
   readonly dashboardUrl: string;
+  registerSchema(topic: string, declaration: SchemaDeclaration): void;
   publish(envelope: EventEnvelope): ReturnTypeOfCreateEventStore["insertEvent"] extends (
     ...args: never[]
   ) => infer Result
@@ -149,6 +154,12 @@ export async function startDaemon(
   const absoluteConfigPath = path.resolve(options.configPath);
   const repositoryRoot = options.repositoryRoot ?? path.dirname(absoluteConfigPath);
   const manifest = await loadManifest(absoluteConfigPath);
+  const schemaRegistry = new SchemaRegistry();
+
+  for (const [topic, declaration] of Object.entries(manifest.schemas)) {
+    schemaRegistry.register(topic, declaration, "manifest");
+  }
+
   const layout = await ensureRuntimeLayout({
     repositoryRoot,
     workspace: manifest.workspace
@@ -175,11 +186,13 @@ export async function startDaemon(
         publishEvent({
           database,
           manifest,
+          schemaRegistry,
           runStore,
           eventStore,
           deliveryStore,
           dispatcher,
-          envelope
+          envelope,
+          ...(options.logger ? { logger: options.logger } : {})
         }),
       ...(options.mcpPort !== undefined ? { port: options.mcpPort } : {})
     });
@@ -205,6 +218,7 @@ export async function startDaemon(
   const adapterWorkerOptions: AdapterWorkerOptions = {
     database,
     manifest,
+    schemaRegistry,
     layout,
     runStore,
     eventStore,
@@ -291,15 +305,21 @@ export async function startDaemon(
     mcpUrl: mcpServer.url,
     dashboardUrl: dashboardServer.url,
 
+    registerSchema(topic: string, declaration: SchemaDeclaration) {
+      schemaRegistry.register(topic, declaration, "programmatic");
+    },
+
     publish(envelope: EventEnvelope) {
       return publishEvent({
         database,
         manifest,
+        schemaRegistry,
         runStore,
         eventStore,
         deliveryStore,
         dispatcher,
-        envelope
+        envelope,
+        ...(options.logger ? { logger: options.logger } : {})
       });
     },
 

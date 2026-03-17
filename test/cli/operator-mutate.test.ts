@@ -156,6 +156,96 @@ test("publish loads a file-backed envelope and rejects invalid payloads", async 
   });
 });
 
+test("publish prints schema validation rejection message for reject-enforced topics", async () => {
+  await withTempRepo(async (configPath, repositoryRoot) => {
+    await writeFile(
+      configPath,
+      `version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+
+agents:
+  - id: ba_codex
+    runtime: codex
+    command: [codex, run]
+  - id: tech_lead_claude
+    runtime: claude-code
+    command: [claude, run]
+  - id: coder_open_code
+    runtime: open-code
+    command: [open-code, run]
+
+subscriptions:
+  - agentId: tech_lead_claude
+    topic: plan_done
+  - agentId: coder_open_code
+    topic: implementation_ready
+
+schemas:
+  plan_done:
+    enforcement: reject
+    schema:
+      type: object
+      properties:
+        sequence:
+          type: integer
+      required:
+        - sequence
+      additionalProperties: false
+
+approvalGates:
+  - topic: plan_done
+    decision: manual
+    approvers: [human]
+    onReject: return_to_producer
+
+artifactConventions: []
+`,
+      "utf8"
+    );
+
+    const envelopeDir = path.join(repositoryRoot, "envelopes");
+    const envelopePath = path.join(envelopeDir, "schema-reject.json");
+
+    await mkdir(envelopeDir, { recursive: true });
+    await writeFile(
+      envelopePath,
+      JSON.stringify(
+        {
+          eventId: "550e8400-e29b-41d4-a716-446655440707",
+          topic: "plan_done",
+          runId: "run-cli-schema-reject",
+          correlationId: "run-cli-schema-reject",
+          dedupeKey: "plan_done:run-cli-schema-reject",
+          occurredAt: "2026-03-09T19:13:00Z",
+          producer: {
+            agentId: "ba_codex",
+            runtime: "codex"
+          },
+          payload: {
+            sequence: "invalid"
+          },
+          payloadMetadata: {},
+          artifactRefs: []
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const result = await runCli(
+      ["publish", "--envelope", "envelopes/schema-reject.json"],
+      repositoryRoot
+    );
+
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr, /Schema validation failed for topic plan_done/);
+  });
+});
+
 test("approval mutation commands preserve actor attribution and rejection feedback", async () => {
   await withTempRepo(async (configPath, repositoryRoot) => {
     const daemon = await startDaemon({

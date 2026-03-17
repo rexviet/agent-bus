@@ -15,6 +15,7 @@ import {
   type ProcessMonitorCallbacks
 } from "../adapters/process-runner.js";
 import type { AgentBusManifest } from "../config/manifest-schema.js";
+import type { SchemaRegistry } from "../config/schema-registry.js";
 import type { RuntimeLayout } from "../shared/runtime-layout.js";
 import type { PersistedDeliveryRecord } from "../storage/delivery-store.js";
 import type { PersistedEventRecord } from "../storage/event-store.js";
@@ -78,6 +79,7 @@ export interface AdapterWorkerExecutionResult {
 export interface AdapterWorkerOptions {
   readonly database: DatabaseSync;
   readonly manifest: AgentBusManifest;
+  readonly schemaRegistry: SchemaRegistry;
   readonly layout: RuntimeLayout;
   readonly runStore: ReturnTypeOfCreateRunStore;
   readonly eventStore: ReturnTypeOfCreateEventStore;
@@ -311,7 +313,14 @@ function finalizeLeaseBoundTransition(
 function publishEmittedEventsAndAcknowledge(
   options: Pick<
     AdapterWorkerOptions,
-    "database" | "manifest" | "runStore" | "eventStore" | "deliveryStore" | "dispatcher"
+    | "database"
+    | "manifest"
+    | "schemaRegistry"
+    | "runStore"
+    | "eventStore"
+    | "deliveryStore"
+    | "dispatcher"
+    | "logger"
   > & {
     readonly deliveryId: string;
     readonly leaseToken: string;
@@ -346,10 +355,12 @@ function publishEmittedEventsAndAcknowledge(
         {
           database: options.database,
           manifest: options.manifest,
+          schemaRegistry: options.schemaRegistry,
           runStore: options.runStore,
           eventStore: options.eventStore,
           deliveryStore: options.deliveryStore,
-          envelope
+          envelope,
+          ...(options.logger ? { logger: options.logger } : {})
         },
         { skipTransaction: true }
       );
@@ -669,6 +680,7 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
           {
             database: options.database,
             manifest: options.manifest,
+            schemaRegistry: options.schemaRegistry,
             runStore: options.runStore,
             eventStore: options.eventStore,
             deliveryStore: options.deliveryStore,
@@ -681,7 +693,8 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
               agentId: agent.id,
               runtime: agent.runtime
             },
-            defaultArtifactRefs: adapterResult.outputArtifacts
+            defaultArtifactRefs: adapterResult.outputArtifacts,
+            ...(deliveryLogger ? { logger: deliveryLogger } : {})
           },
           {
             workPackagePath: processResult.workPackagePath,

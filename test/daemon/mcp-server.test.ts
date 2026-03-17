@@ -7,6 +7,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 import { createMcpServer } from "../../src/daemon/mcp-server.js";
+import { EventSchemaValidationError } from "../../src/domain/schema-error.js";
 
 function buildValidEnvelope(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -189,6 +190,33 @@ test("publish_event catches callback errors and returns isError", async () => {
     assert.equal(payload.isError, true);
     assert.equal(payload.content?.[0]?.type, "text");
     assert.match(payload.content?.[0]?.text ?? "", /boom/);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("publish_event surfaces EventSchemaValidationError as MCP tool error response", async () => {
+  const server = await createMcpServer({
+    publishEvent: () => {
+      throw new EventSchemaValidationError("plan_done", "'/sequence' must be integer");
+    }
+  });
+
+  try {
+    const result = await withMcpClient(server.url, (client) =>
+      client.callTool({
+        name: "publish_event",
+        arguments: buildValidEnvelope()
+      })
+    );
+    const payload = result as {
+      readonly isError?: boolean;
+      readonly content?: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
+    };
+
+    assert.equal(payload.isError, true);
+    assert.equal(payload.content?.[0]?.type, "text");
+    assert.match(payload.content?.[0]?.text ?? "", /Schema validation failed for topic plan_done/);
   } finally {
     await server.stop();
   }
