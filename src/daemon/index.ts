@@ -23,10 +23,6 @@ import type { ProcessMonitorCallbacks } from "../adapters/process-runner.js";
 import { createDeliveryService } from "./delivery-service.js";
 import { createDispatcher, type Dispatcher } from "./dispatcher.js";
 import type { DaemonLogger } from "./logger.js";
-import {
-  createDashboardServer,
-  type DashboardServerHandle
-} from "./dashboard-server.js";
 import { createMcpServer, type McpServerHandle } from "./mcp-server.js";
 import { createOperatorService } from "./operator-service.js";
 import { publishEvent } from "./publish-event.js";
@@ -48,7 +44,6 @@ export interface StartDaemonOptions {
   readonly registerSignalHandlers?: boolean;
   readonly databasePath?: string;
   readonly mcpPort?: number;
-  readonly dashboardPort?: number;
   readonly monitor?: ProcessMonitorCallbacks;
   readonly verboseMonitorFactory?: (agentId: string) => ProcessMonitorCallbacks;
   readonly logger?: DaemonLogger;
@@ -60,7 +55,6 @@ export interface AgentBusDaemon {
   readonly layout: RuntimeLayout;
   readonly databasePath: string;
   readonly mcpUrl: string;
-  readonly dashboardUrl: string;
   publish(envelope: EventEnvelope): ReturnTypeOfCreateEventStore["insertEvent"] extends (
     ...args: never[]
   ) => infer Result
@@ -167,7 +161,6 @@ export async function startDaemon(
   const deliveryStore = createDeliveryStore(database);
   const dispatcher = createDispatcher();
   let mcpServer: McpServerHandle;
-  let dashboardServer: DashboardServerHandle;
 
   try {
     mcpServer = await createMcpServer({
@@ -231,19 +224,6 @@ export async function startDaemon(
     approvalStore,
     deliveryStore
   });
-
-  try {
-    dashboardServer = await createDashboardServer({
-      operatorService,
-      dashboardEmitter: dispatcher.dashboardEmitter,
-      ...(options.dashboardPort !== undefined ? { port: options.dashboardPort } : {})
-    });
-  } catch (error) {
-    await mcpServer.stop();
-    database.close();
-    throw error;
-  }
-  options.logger?.info({ event: "dashboard.started", dashboardUrl: dashboardServer.url });
   const recoveryScan = createRecoveryScan({
     approvalStore,
     deliveryStore,
@@ -274,7 +254,6 @@ export async function startDaemon(
     stopped = true;
     recoveryScan.stop();
     signalCleanup();
-    await dashboardServer.stop();
     await mcpServer.stop();
     database.close();
   };
@@ -289,7 +268,6 @@ export async function startDaemon(
     layout,
     databasePath,
     mcpUrl: mcpServer.url,
-    dashboardUrl: dashboardServer.url,
 
     publish(envelope: EventEnvelope) {
       return publishEvent({

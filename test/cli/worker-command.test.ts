@@ -493,7 +493,6 @@ test("worker forwards --mcp-port and prints startup mcp URL", async () => {
 
         return ({
           mcpUrl: "http://127.0.0.1:12345/mcp",
-          dashboardUrl: "http://127.0.0.1:23456",
           runWorkerIteration() {
             return Promise.resolve(null);
           },
@@ -514,7 +513,6 @@ test("worker forwards --mcp-port and prints startup mcp URL", async () => {
   assert.equal(exitCode, 0);
   assert.equal(capturedMcpPort, 12345);
   assert.match(stdout.read(), /mcp: http:\/\/127\.0\.0\.1:12345\/mcp/);
-  assert.match(stdout.read(), /dashboard: http:\/\/127\.0\.0\.1:23456/);
 });
 
 test("worker defaults log level to info when --log-level is omitted", async () => {
@@ -591,7 +589,6 @@ test("worker keeps other slots running when one slot iteration fails", async () 
       startDaemon: async () =>
         ({
           mcpUrl: "http://127.0.0.1:9999/mcp",
-          dashboardUrl: "http://127.0.0.1:19999",
           runWorkerIteration(workerId: string) {
             seenWorkerIds.push(workerId);
 
