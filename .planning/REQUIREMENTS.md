@@ -71,28 +71,28 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SCHEMA-01 | — | Pending |
-| SCHEMA-02 | — | Pending |
-| SCHEMA-03 | — | Pending |
-| SCHEMA-04 | — | Pending |
-| SCHEMA-05 | — | Pending |
-| SCHEMA-06 | — | Pending |
-| DASH-01 | — | Pending |
-| DASH-02 | — | Pending |
-| DASH-03 | — | Pending |
-| DASH-04 | — | Pending |
-| DASH-05 | — | Pending |
-| DASH-06 | — | Pending |
-| DASH-07 | — | Pending |
-| DASH-08 | — | Pending |
-| DEPR-01 | — | Pending |
-| DEPR-02 | — | Pending |
+| DASH-01 | Phase 9 | Pending |
+| DASH-02 | Phase 9 | Pending |
+| DASH-03 | Phase 9 | Pending |
+| DASH-04 | Phase 9 | Pending |
+| DASH-05 | Phase 9 | Pending |
+| DASH-06 | Phase 9 | Pending |
+| DASH-07 | Phase 9 | Pending |
+| DASH-08 | Phase 9 | Pending |
+| SCHEMA-01 | Phase 10 | Pending |
+| SCHEMA-02 | Phase 10 | Pending |
+| SCHEMA-03 | Phase 10 | Pending |
+| SCHEMA-04 | Phase 10 | Pending |
+| SCHEMA-05 | Phase 10 | Pending |
+| SCHEMA-06 | Phase 10 | Pending |
+| DEPR-01 | Phase 11 | Pending |
+| DEPR-02 | Phase 11 | Pending |
 
 **Coverage:**
 - v1.2 requirements: 16 total
-- Mapped to phases: 0
-- Unmapped: 16 ⚠️
+- Mapped to phases: 16
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-03-17*
-*Last updated: 2026-03-17 after initial definition*
+*Last updated: 2026-03-17 — traceability mapped after roadmap creation*
