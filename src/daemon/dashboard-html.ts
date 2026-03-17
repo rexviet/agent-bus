@@ -136,6 +136,7 @@ export function getDashboardHtml(): string {
       </div>
       <div class="controls">
         <label><input id="show-all" type="checkbox" /> Show all sections</label>
+        <div style="margin-top:8px">Security: localhost-only dashboard (no authentication in v1).</div>
       </div>
       <section id="approvals-section" class="section">
         <div class="section-header"><strong>Pending Approvals</strong><span id="approvals-count" class="badge">0</span></div>
@@ -155,6 +156,16 @@ export function getDashboardHtml(): string {
       const byId = (id) => document.getElementById(id);
       const statusClass = (status) => String(status || "unknown").replace(/[^a-z0-9_]/gi, "_").toLowerCase();
       const shortId = (id) => String(id || "").slice(0, 8);
+      const toText = (value) => String(value ?? "");
+      const escapeHtml = (value) =>
+        toText(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      const escapeAttr = (value) => escapeHtml(value).replace(/\u0060/g, "&#96;");
+      const safeDomId = (value) => toText(value).replace(/[^a-zA-Z0-9_-]/g, "_");
       function relativeTime(iso) {
         const time = Date.parse(iso || "");
         if (Number.isNaN(time)) return "unknown";
@@ -181,7 +192,7 @@ export function getDashboardHtml(): string {
         byId("runs-section").hidden = !(showAll || state.runs.length > 0);
       }
       function statusPill(status) {
-        return '<span class="status-pill status-' + statusClass(status) + '">' + String(status || "unknown") + "</span>";
+        return '<span class="status-pill status-' + statusClass(status) + '">' + escapeHtml(status || "unknown") + "</span>";
       }
       function statusDot(status) {
         return '<span class="status-dot dot-' + statusClass(status) + '"></span>';
@@ -206,14 +217,17 @@ export function getDashboardHtml(): string {
           return;
         }
         root.innerHTML = state.approvals
-          .map((approval) =>
+          .map((approval) => {
+            const requestedAt = toText(approval.requestedAt);
+            return (
             '<div class="row"><div class="approval-main">' +
-              "<div>" + shortId(approval.approvalId) + "</div>" +
-              '<div class="muted">' + approval.topic + "</div>" +
-              '<div class="muted">run ' + shortId(approval.runId) + "</div>" +
-              '<div class="muted" data-relative-time="' + approval.requestedAt + '">' + relativeTime(approval.requestedAt) + "</div>" +
+              "<div>" + escapeHtml(shortId(approval.approvalId)) + "</div>" +
+              '<div class="muted">' + escapeHtml(approval.topic) + "</div>" +
+              '<div class="muted">run ' + escapeHtml(shortId(approval.runId)) + "</div>" +
+              '<div class="muted" data-relative-time="' + escapeAttr(requestedAt) + '">' + escapeHtml(relativeTime(requestedAt)) + "</div>" +
             "</div></div>"
-          )
+            );
+          })
           .join("");
         applySectionVisibility();
       }
@@ -226,15 +240,19 @@ export function getDashboardHtml(): string {
           return;
         }
         root.innerHTML = state.failures
-          .map((failure) =>
-            '<div class="row" id="failure-' + failure.deliveryId + '">' +
-              '<button class="failure-main" type="button" data-failure-run-id="' + failure.runId + '" data-failure-delivery-id="' + failure.deliveryId + '" style="all:unset;display:grid;grid-template-columns:minmax(80px,140px) minmax(100px,160px) 1fr auto;gap:10px;cursor:pointer;width:100%;">' +
-                "<div>" + shortId(failure.deliveryId) + "</div>" +
-                '<div class="muted">' + failure.agentId + "</div>" +
-                '<div class="muted">' + String(failure.lastError || "unknown error").slice(0, 80) + "</div>" +
-                '<div class="muted">' + failure.attemptCount + "/" + failure.maxAttempts + "</div>" +
+          .map((failure) => {
+            const deliveryId = toText(failure.deliveryId);
+            const runId = toText(failure.runId);
+            return (
+            '<div class="row" id="failure-' + safeDomId(deliveryId) + '">' +
+              '<button class="failure-main" type="button" data-failure-run-id="' + escapeAttr(runId) + '" data-failure-delivery-id="' + escapeAttr(deliveryId) + '" style="all:unset;display:grid;grid-template-columns:minmax(80px,140px) minmax(100px,160px) 1fr auto;gap:10px;cursor:pointer;width:100%;">' +
+                "<div>" + escapeHtml(shortId(deliveryId)) + "</div>" +
+                '<div class="muted">' + escapeHtml(failure.agentId) + "</div>" +
+                '<div class="muted">' + escapeHtml(toText(failure.lastError || "unknown error").slice(0, 80)) + "</div>" +
+                '<div class="muted">' + escapeHtml(toText(failure.attemptCount) + "/" + toText(failure.maxAttempts)) + "</div>" +
               "</button></div>"
-          )
+            );
+          })
           .join("");
         root.querySelectorAll("[data-failure-run-id]").forEach((button) => {
           button.addEventListener("click", async () => {
@@ -249,21 +267,31 @@ export function getDashboardHtml(): string {
       function renderRunDetail(runId) {
         const detail = state.runDetails.get(runId);
         if (!detail) return '<div class="run-detail"><div class="muted">Loading...</div></div>';
-        const deliveriesRows = detail.deliveries.map((delivery) =>
-          '<tr id="delivery-' + delivery.deliveryId + '">' +
-            "<td>" + delivery.agentId + "</td>" +
-            "<td>" + statusDot(delivery.status) + " " + String(delivery.status) + "</td>" +
-            "<td>" + delivery.attemptCount + "/" + delivery.maxAttempts + "</td>" +
-            '<td class="muted" data-relative-time="' + delivery.updatedAt + '">' + relativeTime(delivery.updatedAt) + "</td>" +
-            '<td class="muted">' + (delivery.lastError ? String(delivery.lastError) : "") + "</td>" +
+        const deliveriesRows = detail.deliveries.map((delivery) => {
+          const deliveryId = toText(delivery.deliveryId);
+          const updatedAt = toText(delivery.updatedAt);
+          return (
+          '<tr id="delivery-' + safeDomId(deliveryId) + '">' +
+            "<td>" + escapeHtml(delivery.agentId) + "</td>" +
+            "<td>" + statusDot(delivery.status) + " " + escapeHtml(delivery.status) + "</td>" +
+            "<td>" + escapeHtml(toText(delivery.attemptCount) + "/" + toText(delivery.maxAttempts)) + "</td>" +
+            '<td class="muted" data-relative-time="' + escapeAttr(updatedAt) + '">' + escapeHtml(relativeTime(updatedAt)) + "</td>" +
+            '<td class="muted">' + escapeHtml(delivery.lastError ? toText(delivery.lastError) : "") + "</td>" +
           "</tr>"
-        ).join("");
-        const eventsRows = detail.events.map((event) =>
-          "<tr><td>" + shortId(event.eventId) + "</td><td>" + event.topic + '</td><td class="muted" data-relative-time="' + event.occurredAt + '">' + relativeTime(event.occurredAt) + "</td></tr>"
-        ).join("");
-        const approvalsRows = detail.approvals.map((approval) =>
-          "<tr><td>" + shortId(approval.approvalId) + "</td><td>" + statusPill(approval.status) + '</td><td class="muted" data-relative-time="' + approval.requestedAt + '">' + relativeTime(approval.requestedAt) + "</td></tr>"
-        ).join("");
+          );
+        }).join("");
+        const eventsRows = detail.events.map((event) => {
+          const occurredAt = toText(event.occurredAt);
+          return (
+          "<tr><td>" + escapeHtml(shortId(event.eventId)) + "</td><td>" + escapeHtml(event.topic) + '</td><td class="muted" data-relative-time="' + escapeAttr(occurredAt) + '">' + escapeHtml(relativeTime(occurredAt)) + "</td></tr>"
+          );
+        }).join("");
+        const approvalsRows = detail.approvals.map((approval) => {
+          const requestedAt = toText(approval.requestedAt);
+          return (
+          "<tr><td>" + escapeHtml(shortId(approval.approvalId)) + "</td><td>" + statusPill(approval.status) + '</td><td class="muted" data-relative-time="' + escapeAttr(requestedAt) + '">' + escapeHtml(relativeTime(requestedAt)) + "</td></tr>"
+          );
+        }).join("");
         return '<div class="run-detail">' +
           '<div class="detail-block"><h4 class="detail-title">Deliveries</h4><table class="detail-table"><thead><tr><th>Agent</th><th>Status</th><th>Attempts</th><th>Updated</th><th>Error</th></tr></thead><tbody>' + (deliveriesRows || '<tr><td colspan="5" class="muted">No deliveries</td></tr>') + "</tbody></table></div>" +
           '<div class="detail-block"><h4 class="detail-title">Events</h4><table class="detail-table"><thead><tr><th>Event</th><th>Topic</th><th>Occurred</th></tr></thead><tbody>' + (eventsRows || '<tr><td colspan="3" class="muted">No events</td></tr>') + "</tbody></table></div>" +
@@ -283,14 +311,15 @@ export function getDashboardHtml(): string {
             const progressDone = (run.deliveryStatusCounts?.completed || 0) + (run.deliveryStatusCounts?.cancelled || 0);
             const progressTotal = run.deliveryStatusCounts?.total || 0;
             const when = run.latestEventAt || run.updatedAt;
-            return '<div class="row run-row" id="run-' + run.runId + '" data-run-id="' + run.runId + '">' +
+            const runId = toText(run.runId);
+            return '<div class="row run-row" id="run-' + safeDomId(runId) + '" data-run-id="' + escapeAttr(runId) + '">' +
               '<div class="run-main">' +
-                "<div>" + shortId(run.runId) + "</div>" +
+                "<div>" + escapeHtml(shortId(runId)) + "</div>" +
                 '<div class="status">' + statusPill(run.status) + "</div>" +
-                '<div class="muted">deliveries ' + progressDone + "/" + progressTotal + "</div>" +
-                '<div class="muted" data-relative-time="' + when + '">' + relativeTime(when) + "</div>" +
+                '<div class="muted">deliveries ' + escapeHtml(progressDone + "/" + progressTotal) + "</div>" +
+                '<div class="muted" data-relative-time="' + escapeAttr(when) + '">' + escapeHtml(relativeTime(when)) + "</div>" +
               "</div>" +
-              (state.expandedRunId === run.runId ? renderRunDetail(run.runId) : "") +
+              (state.expandedRunId === runId ? renderRunDetail(runId) : "") +
             "</div>";
           })
           .join("");
@@ -314,10 +343,10 @@ export function getDashboardHtml(): string {
         const detail = await fetchJson("/api/runs/" + encodeURIComponent(runId));
         state.runDetails.set(runId, detail);
         renderRuns();
-        const runElement = byId("run-" + runId);
+        const runElement = byId("run-" + safeDomId(runId));
         if (runElement) runElement.scrollIntoView({ behavior: "smooth", block: "center" });
         if (highlightDeliveryId) {
-          const deliveryRow = byId("delivery-" + highlightDeliveryId);
+          const deliveryRow = byId("delivery-" + safeDomId(highlightDeliveryId));
           if (deliveryRow) {
             deliveryRow.classList.add("highlight");
             deliveryRow.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -339,17 +368,20 @@ export function getDashboardHtml(): string {
       function connect() {
         const source = new EventSource("/events");
         let retryMs = state.retryMs;
+        let connectedAt = 0;
         source.addEventListener("snapshot", (event) => {
           renderAll(JSON.parse(event.data || "{}"));
-          retryMs = 3000;
-          state.retryMs = 3000;
+          if (connectedAt === 0) {
+            connectedAt = Date.now();
+          }
           setIndicator("live");
         });
         source.addEventListener("delivery.state_changed", (event) => {
           const payload = JSON.parse(event.data || "{}");
           if (payload.deliveryId) {
-            flashRow("delivery-" + payload.deliveryId);
-            flashRow("failure-" + payload.deliveryId);
+            const safeDeliveryId = safeDomId(payload.deliveryId);
+            flashRow("delivery-" + safeDeliveryId);
+            flashRow("failure-" + safeDeliveryId);
           }
           void refreshRuns();
         });
@@ -359,12 +391,18 @@ export function getDashboardHtml(): string {
         source.onerror = () => {
           setIndicator("disconnected");
           source.close();
+          const reconnectDelay = retryMs;
           setTimeout(() => {
             setIndicator("reconnecting");
             connect();
-          }, retryMs);
-          retryMs = Math.min(retryMs * 2, 30000);
+          }, reconnectDelay);
+          if (connectedAt > 0 && Date.now() - connectedAt >= 15000) {
+            retryMs = 3000;
+          } else {
+            retryMs = Math.min(retryMs * 2, 30000);
+          }
           state.retryMs = retryMs;
+          connectedAt = 0;
         };
       }
       byId("show-all").addEventListener("change", applySectionVisibility);

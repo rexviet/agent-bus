@@ -30,6 +30,7 @@ export interface CreateDashboardServerOptions {
   };
   readonly dashboardEmitter: DashboardEmitter;
   readonly port?: number;
+  readonly maxSseConnections?: number;
 }
 
 function listenHttpServer(server: http.Server, port?: number): Promise<number> {
@@ -74,6 +75,7 @@ export async function createDashboardServer(
 ): Promise<DashboardServerHandle> {
   const app = new Hono();
   const activeControllers = new Set<AbortController>();
+  const maxSseConnections = options.maxSseConnections ?? 10;
 
   app.get("/api/runs", (c) => {
     return c.json(options.operatorService.listRunSummaries(50));
@@ -98,6 +100,10 @@ export async function createDashboardServer(
   });
 
   app.get("/events", (c) => {
+    if (activeControllers.size >= maxSseConnections) {
+      return c.json({ error: "too many active dashboard event streams" }, 429);
+    }
+
     return streamSSE(c, async (stream) => {
       const controller = new AbortController();
       activeControllers.add(controller);

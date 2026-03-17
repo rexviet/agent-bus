@@ -78,7 +78,7 @@ export function createApprovalService({
 
       for (const delivery of deliveries) {
         if (delivery.status === "ready") {
-          dispatcher.handleReadyDelivery(delivery);
+          dispatcher.handleReadyDelivery(delivery, event.runId);
         }
       }
       dispatcher.dashboardEmitter.emit("dashboard", {

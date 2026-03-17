@@ -55,7 +55,8 @@ export function createRecoveryScan({
     }
 
     for (const delivery of readyDeliveries) {
-      dispatcher.handleReadyDelivery(delivery);
+      const event = eventStore.getEvent(delivery.eventId);
+      dispatcher.handleReadyDelivery(delivery, event?.runId);
     }
 
     return pendingApprovals.length + readyDeliveries.length;

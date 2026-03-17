@@ -200,7 +200,7 @@ export function dispatchPublishedEvent(
   }
 
   for (const delivery of result.plannedDeliveries) {
-    dispatcher.handleReadyDelivery(delivery);
+    dispatcher.handleReadyDelivery(delivery, result.event.runId);
   }
 }
 

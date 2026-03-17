@@ -205,6 +205,8 @@ describe("dashboard server", () => {
     assert.match(html, /#f87171/);
     assert.equal(html.includes("<script src="), false);
     assert.equal(html.includes("<link rel=\"stylesheet\" href="), false);
+    assert.match(html, /const escapeHtml =/);
+    assert.match(html, /const escapeAttr =/);
   });
 
   it("streams snapshot and relays dashboard events", async () => {
@@ -278,14 +280,36 @@ describe("dashboard server", () => {
     await new Promise((resolve) => setTimeout(resolve, 40));
     assert.equal(dashboardEmitter.listenerCount("dashboard"), 0);
   });
+
+  it("limits concurrent SSE clients", async () => {
+    server = await createDashboardServer({
+      operatorService: operatorService as never,
+      dashboardEmitter: dashboardEmitter as never,
+      maxSseConnections: 1
+    });
+
+    const first = await fetch(`${server.url}/events`);
+    assert.equal(first.status, 200);
+
+    const second = await fetch(`${server.url}/events`);
+    assert.equal(second.status, 429);
+    const payload = (await second.json()) as { error?: string };
+    assert.equal(payload.error, "too many active dashboard event streams");
+
+    await first.body?.cancel();
+  });
 });
 
 describe("dispatcher dashboard events", () => {
   it("emits typed dashboard events while preserving snapshot behavior", () => {
     const dispatcher = createDispatcher();
     const events: string[] = [];
+    let deliveryPayload: Record<string, unknown> | null = null;
     dispatcher.dashboardEmitter.on("dashboard", (event) => {
       events.push(event.type);
+      if (event.type === "delivery.state_changed") {
+        deliveryPayload = event.payload;
+      }
     });
 
     dispatcher.handlePersistedEvent({
@@ -316,7 +340,6 @@ describe("dispatcher dashboard events", () => {
     dispatcher.handleReadyDelivery({
       deliveryId: "delivery-101",
       eventId: "event-101",
-      runId: "run-101",
       agentId: "developer_codex",
       topic: "plan_done",
       status: "ready",
@@ -326,10 +349,13 @@ describe("dispatcher dashboard events", () => {
       replayCount: 0,
       createdAt: "2026-03-17T01:00:00Z",
       updatedAt: "2026-03-17T01:00:00Z"
-    } as never);
+    }, "run-101");
 
     assert.equal(dispatcher.snapshot().length, 3);
     assert.deepEqual(events, ["event.published", "approval.created", "delivery.state_changed"]);
+    assert.equal(deliveryPayload?.["runId"], "run-101");
+    assert.equal(deliveryPayload?.["oldState"], null);
+    assert.equal(deliveryPayload?.["newState"], "ready");
   });
 });
 

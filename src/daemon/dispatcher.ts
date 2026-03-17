@@ -101,7 +101,10 @@ export function createDispatcher() {
       return notification;
     },
 
-    handleReadyDelivery(delivery: PersistedDeliveryRecord): DispatchNotification {
+    handleReadyDelivery(
+      delivery: PersistedDeliveryRecord,
+      runId?: string
+    ): DispatchNotification {
       const notification = recordNotification({
         eventId: delivery.eventId,
         topic: delivery.topic,
@@ -115,16 +118,14 @@ export function createDispatcher() {
         recordedAt: new Date().toISOString()
       });
 
-      const deliveryRunId = (delivery as PersistedDeliveryRecord & { runId?: string }).runId;
-
       dashboardEmitter.emit("dashboard", {
         type: "delivery.state_changed",
         payload: {
           deliveryId: delivery.deliveryId,
           eventId: delivery.eventId,
-          ...(deliveryRunId ? { runId: deliveryRunId } : {}),
+          ...(runId ? { runId } : {}),
           agentId: delivery.agentId,
-          oldState: undefined,
+          oldState: null,
           newState: delivery.status
         }
       });
