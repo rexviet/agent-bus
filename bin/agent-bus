@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MIN_NODE_MAJOR=22
-MIN_NODE_MINOR=12
+MIN_NODE_MAJOR=24
+MIN_NODE_MINOR=0
 
 resolve_script_path() {
   local source_path="$1"
@@ -45,7 +45,7 @@ if [ -z "$TARGET_NODE_VERSION" ] && [ -f "$REPO_ROOT/.nvmrc" ]; then
   TARGET_NODE_VERSION="$(tr -d '[:space:]' < "$REPO_ROOT/.nvmrc")"
 fi
 
-TARGET_NODE_VERSION="${TARGET_NODE_VERSION:-22.12.0}"
+TARGET_NODE_VERSION="${TARGET_NODE_VERSION:-24.14.0}"
 
 if [ ! -f "$CLI_PATH" ]; then
   echo "agent-bus is not built. Run 'npm install' and 'npm run build' in $REPO_ROOT." >&2
@@ -59,7 +59,7 @@ if command -v node >/dev/null 2>&1; then
 fi
 
 if [ -n "$CURRENT_NODE_VERSION" ] && version_satisfies_requirement "$CURRENT_NODE_VERSION"; then
-  exec node --experimental-sqlite "$CLI_PATH" "$@"
+  exec node "$CLI_PATH" "$@"
 fi
 
 NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
@@ -70,17 +70,17 @@ if [ -s "$NVM_DIR/nvm.sh" ]; then
 
   if nvm ls "$TARGET_NODE_VERSION" >/dev/null 2>&1; then
     nvm use --silent "$TARGET_NODE_VERSION" >/dev/null
-    exec node --experimental-sqlite "$CLI_PATH" "$@"
+    exec node "$CLI_PATH" "$@"
   fi
 
-  echo "agent-bus requires Node >=22.12.0. Install it first with: nvm install $TARGET_NODE_VERSION" >&2
+  echo "agent-bus requires Node >=24.0.0. Install it first with: nvm install $TARGET_NODE_VERSION" >&2
   exit 1
 fi
 
 if [ -n "$CURRENT_NODE_VERSION" ]; then
-  echo "agent-bus requires Node >=22.12.0, but the current node is $CURRENT_NODE_VERSION and nvm was not found." >&2
+  echo "agent-bus requires Node >=24.0.0, but the current node is $CURRENT_NODE_VERSION and nvm was not found." >&2
 else
-  echo "agent-bus requires Node >=22.12.0 and could not find a usable node binary." >&2
+  echo "agent-bus requires Node >=24.0.0 and could not find a usable node binary." >&2
 fi
 
 exit 1
