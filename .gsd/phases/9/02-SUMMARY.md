@@ -43,6 +43,8 @@ requirements-completed:
 
 completed: 2026-03-17
 ---
+<!-- AUTO-GENERATED from .planning/phases/09-web-dashboard/09-02-SUMMARY.md by scripts/sync-planning-to-gsd.mjs. source-sha256: eb6c7fae62f0fe9a061a0d70fc0b69f44cdbf5ac5b11703f205c6e5650c4aa08. Edit the source file, not this projection. -->
+
 
 # Phase 09 Plan 02 Summary
 
