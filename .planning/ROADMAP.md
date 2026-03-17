@@ -4,8 +4,8 @@
 
 - ✅ **v1.0 Core Runtime** — Phases 1-4 (shipped 2026-03-10)
 - ✅ **v1.1 Production Hardening** — Phases 5-8 (shipped 2026-03-16)
-- ○ **v1.2 Developer Experience** — SDK/library mode, event schema registry, web dashboard, plugin system for adapters
-- ○ **v1.3 Scale & Ecosystem** — PostgreSQL backend option, distributed worker support, adapter marketplace, multi-repo orchestration
+- ○ **v1.2 Developer Experience** — Event schema registry, web dashboard, deprecate `events` array
+- ○ **v1.3 Scale & Ecosystem** — SDK/library mode, plugin adapter system, PostgreSQL backend option, distributed worker support, adapter marketplace, multi-repo orchestration
 
 ## Phases
 

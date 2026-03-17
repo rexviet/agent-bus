@@ -44,10 +44,8 @@ Enable asynchronous, event-driven coordination between multiple agent runtimes i
 
 <!-- Current milestone: v1.2 Developer Experience -->
 
-- [ ] SDK/library mode for programmatic embedding
 - [ ] Event schema registry with validation
 - [ ] Web dashboard for operator visibility
-- [ ] Plugin system for runtime adapters
 - [ ] Deprecate `events` array in result envelope (MCP replaces it)
 
 ### Out of Scope
@@ -93,13 +91,11 @@ Enable asynchronous, event-driven coordination between multiple agent runtimes i
 
 ## Current Milestone: v1.2 Developer Experience
 
-**Goal:** Make Agent Bus easy to embed, extend, and observe — SDK/library mode, schema validation, web dashboard, and adapter plugins.
+**Goal:** Make Agent Bus safer and more observable — event schema validation, web dashboard for real-time visibility, and legacy cleanup.
 
 **Target features:**
-- SDK/library mode for programmatic embedding
 - Event schema registry with validation
 - Web dashboard for operator visibility
-- Plugin system for runtime adapters
 - Deprecate `events` array in result envelope
 
 ---
