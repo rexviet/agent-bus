@@ -5,6 +5,8 @@ verdict: PARTIAL
 pass_count: 4
 total_count: 5
 ---
+<!-- AUTO-GENERATED from .planning/phases/09-web-dashboard/09-VERIFICATION.md by scripts/sync-planning-to-gsd.mjs. source-sha256: 7c5ae0bd2df822be7ddbeb1bc25084089281438df6525c07e8d1e87753237c1b. Edit the source file, not this projection. -->
+
 
 # Phase 9 Verification Report
 
