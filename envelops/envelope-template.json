@@ -1,0 +1,25 @@
+{
+  "eventId": "REPLACE_WITH_UUID",
+  "topic": "REPLACE_WITH_TOPIC",
+  "runId": "REPLACE_WITH_RUN_ID",
+  "correlationId": "REPLACE_WITH_CORRELATION_ID",
+  "dedupeKey": "REPLACE_WITH_DEDUPE_KEY",
+  "occurredAt": "2026-03-10T08:00:00Z",
+  "producer": {
+    "agentId": "REPLACE_WITH_AGENT_ID",
+    "runtime": "REPLACE_WITH_RUNTIME"
+  },
+  "payload": {
+    "title": "REPLACE_WITH_TITLE"
+  },
+  "payloadMetadata": {
+    "template": true
+  },
+  "artifactRefs": [
+    {
+      "path": "REPLACE_WITH_ARTIFACT_PATH",
+      "role": "primary",
+      "description": "REPLACE_WITH_ARTIFACT_DESCRIPTION"
+    }
+  ]
+}

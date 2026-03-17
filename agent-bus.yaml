@@ -1,88 +1,43 @@
 version: 1
+
 workspace:
-  artifactsDir: workspace
+  artifactsDir: .agent-bus/artifacts
   stateDir: .agent-bus/state
   logsDir: .agent-bus/logs
 
 agents:
-  - id: ba_codex
+  - id: developer_codex
     runtime: codex
-    description: Business analyst and planning agent running in Codex.
+    description: Developer agent — syncs planning to GSD then executes phase implementation via GSD workflows.
+    identityFile: .agent/identities/developer.md
     command:
       - codex
       - exec
-  - id: tech_lead_claude
+      - --model
+      - gpt-5.3-codex
+      - --skip-git-repo-check
+      - --full-auto
+    environment:
+      CODEX_QUIET: "1"
+
+  - id: reviewer_claude
     runtime: claude-code
-    description: System design agent running in Claude Code.
+    description: Code reviewer running Claude Opus via Claude Code CLI.
+    identityFile: .agent/identities/reviewer.md
     command:
       - claude
-      - run
-      - --mode
-      - design
-  - id: qa_gemini
-    runtime: gemini
-    description: QA agent producing acceptance tests and test cases through Gemini CLI.
-    command:
-      - gemini
-  - id: coder_open_code
-    runtime: open-code
-    description: Implementation agent running in Open Code with a local model.
-    command:
-      - opencode
-      - run
+      - --model
+      - claude-opus-4-6
 
 subscriptions:
-  - agentId: tech_lead_claude
+  - agentId: developer_codex
     topic: plan_done
-    description: Start system design after approved planning.
-    requiredArtifacts:
-      - path: docs/plan.md
-        role: input
-        description: Approved delivery plan.
-  - agentId: qa_gemini
-    topic: plan_done
-    description: Produce test cases from the approved plan.
-    requiredArtifacts:
-      - path: docs/plan.md
-        role: input
-        description: Approved delivery plan.
-  - agentId: coder_open_code
-    topic: system_design_done
-    description: Start implementation after approved system design.
-    requiredArtifacts:
-      - path: docs/plan.md
-        role: input
-        description: Approved delivery plan.
-      - path: docs/system-design.md
-        role: input
-        description: Approved system design.
-      - path: docs/test-cases.md
-        role: input
-        description: QA test cases produced from the plan.
+    description: Sync planning docs to GSD and execute the phase after Claude finishes planning.
 
-approvalGates:
-  - topic: plan_done
-    decision: manual
-    approvers:
-      - human
-    onReject: return_to_producer
-  - topic: system_design_done
-    decision: manual
-    approvers:
-      - human
-    onReject: return_to_producer
+  - agentId: reviewer_claude
+    topic: pr_ready
+    description: Review the pull request after Codex creates it.
 
-artifactConventions:
-  - topic: plan_done
-    outputs:
-      - path: docs/plan.md
-        role: primary
-        description: Approved implementation plan.
-  - topic: system_design_done
-    outputs:
-      - path: docs/system-design.md
-        role: primary
-        description: Approved system design.
-      - path: docs/test-cases.md
-        role: companion
-        description: QA test cases generated from the plan.
+approvalGates: []
+
+artifactConventions: []

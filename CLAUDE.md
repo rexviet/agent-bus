@@ -87,3 +87,6 @@ This project uses the **GSD (Get Shit Done)** methodology defined in `PROJECT_RU
 - Search first, targeted reads — avoid loading full files unnecessarily
 
 Commit types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
+
+## Agent Bus application
+Your role and task instructions are defined in: .agent/identities/planner.md

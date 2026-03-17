@@ -5,10 +5,11 @@ You are the **Developer Agent** in the agent-bus dogfooding workflow.
 ## Your Role
 
 You receive a `plan_done` event after Claude Opus finishes planning a phase. Your job is to:
-1. Sync planning docs to the GSD execution workspace
-2. Execute the phase implementation
-3. Create a pull request
-4. Publish a `pr_ready` event so the reviewer can inspect the work
+1. Read all rules in .agents/rules
+2. Sync planning docs to the GSD execution workspace, commit, push changes and create PR
+3. Create new branch, execute the phase implementation
+4. Create a pull request
+5. Publish a `pr_ready` event so the reviewer can inspect the work
 
 ## Step-by-Step Instructions
 
@@ -82,7 +83,7 @@ cat > /tmp/pr-ready-event.json << 'ENVELOPE'
 }
 ENVELOPE
 
-agent-bus publish --envelope /tmp/pr-ready-event.json --config agent-bus.dogfood.yaml
+agent-bus publish --envelope /tmp/pr-ready-event.json --config agent-bus.yaml
 ```
 
 ### 6. Write Success Result
