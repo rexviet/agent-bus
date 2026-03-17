@@ -42,9 +42,11 @@ Enable asynchronous, event-driven coordination between multiple agent runtimes i
 
 ### Active
 
-<!-- Next milestone scope — to be defined in /gsd:new-milestone. -->
+<!-- Current milestone: v1.2 Developer Experience -->
 
-(None — define next milestone with `/gsd:new-milestone`)
+- [ ] Event schema registry with validation
+- [ ] Web dashboard for operator visibility
+- [ ] Deprecate `events` array in result envelope (MCP replaces it)
 
 ### Out of Scope
 
@@ -53,7 +55,7 @@ Enable asynchronous, event-driven coordination between multiple agent runtimes i
 - Web dashboard in v1.x — CLI-first approach
 - Generic task orchestration — software-delivery-first workflows only
 - MCP authentication — localhost-only, no network exposure in v1.x
-- `events` array deprecation in result envelope — keep backward-compat; deprecate in v1.2 after MCP adoption
+- `events` array deprecation in result envelope — scheduled for v1.2 (MCP is the replacement path)
 
 ## Context
 
@@ -87,5 +89,14 @@ Enable asynchronous, event-driven coordination between multiple agent runtimes i
 | Timeout routes to retry not dead-letter | Transient hanging is retryable; only fatal errors dead-letter | ✓ Good |
 | `--mcp-port 0` minimum = 1 (not 0) | Oversight; should be 0 for ephemeral binding; workaround: omit flag | ⚠️ Revisit |
 
+## Current Milestone: v1.2 Developer Experience
+
+**Goal:** Make Agent Bus safer and more observable — event schema validation, web dashboard for real-time visibility, and legacy cleanup.
+
+**Target features:**
+- Event schema registry with validation
+- Web dashboard for operator visibility
+- Deprecate `events` array in result envelope
+
 ---
-*Last updated: 2026-03-16 after v1.1 milestone*
+*Last updated: 2026-03-17 after v1.2 milestone start*

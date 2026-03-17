@@ -1,202 +1,177 @@
-<!-- AUTO-GENERATED from .planning/research/SUMMARY.md by scripts/sync-planning-to-gsd.mjs. source-sha256: 96565c63ead894bcce2ea0025eacec80ccceb46dd2c7616c07c1a7dccaad9eb2. Edit the source file, not this projection. -->
+<!-- AUTO-GENERATED from .planning/research/SUMMARY.md by scripts/sync-planning-to-gsd.mjs. source-sha256: dd8c4511a199805476ae251754538aa9999073c830dded9a117deb84d8476926. Edit the source file, not this projection. -->
 
 # Project Research Summary
 
-**Project:** Agent Bus v1.1 — Production Hardening
-**Domain:** Node.js event-driven daemon hardening — process lifecycle, observability, concurrency, security, MCP protocol embedding
-**Researched:** 2026-03-14
-**Confidence:** HIGH (stack, features, architecture based on direct codebase analysis; MEDIUM on MCP SDK version specifics)
+**Project:** Agent Bus v1.2 — Developer Experience
+**Domain:** Local-first event-driven agent orchestration runtime — SDK packaging, schema validation, operator visibility, extensibility
+**Researched:** 2026-03-17
+**Confidence:** HIGH
 
 ## Executive Summary
 
-Agent Bus v1.1 is a targeted production hardening release for an existing, well-structured local-first orchestration daemon. The v1.0 codebase is in better shape than a greenfield project: the process timeout mechanism already exists in `process-runner.ts` (just unwired), the env isolation gap is a single spread expression, and the SQLite WAL mode already handles concurrent access safely. The core work is completing plumbing that was partially built but never connected to the manifest configuration surface, plus two genuinely new features (structured logging and the embedded MCP server).
+Agent Bus v1.2 is a developer experience milestone for an already-functioning orchestration runtime. The v1.1 foundation is solid: SQLite with WAL, a durable delivery state machine, pino structured logging, MCP server, and four built-in agent adapters. The v1.2 scope is additive rather than architectural — the research found that three of four new features (SDK mode, event schema registry, plugin adapter system) require zero new npm dependencies and build directly on existing seams in the codebase. Only the web dashboard requires new production dependencies (`hono` + `@hono/node-server`), and these are lightweight, ESM-native, and well-suited to the project's minimal-dependency philosophy.
 
-The recommended build order is strictly dependency-ordered: manifest schema changes first (all features read from here), then the lightweight safety fixes (timeout propagation, env isolation), then observability (structured logging), then concurrency (worker pool), then the largest new surface (MCP server). This order minimizes risk at each step — each phase lands on a stable foundation. The three low-complexity features (timeout wiring, env isolation, manifest schema) can be grouped into a single first phase and shipped with minimal test disruption.
+The recommended implementation approach is phased in dependency order: stabilize the adapter registry first (plugin system), then add optional payload validation at the publish boundary (schema registry), then surface the programmatic API cleanly (SDK packaging), and finally layer the dashboard on top of the already-queryable `OperatorService`. This order avoids premature API exposure, keeps each phase testable in isolation, and defers the highest-complexity feature — the dashboard with HTTP server lifecycle, SSE, and static assets — until the data layer it reads from is validated. The `events[]` deprecation is a low-risk cleanup that can ship at any point.
 
-The primary risks are not architectural but operational: process group kill on timeout (grandchildren survive SIGTERM to the direct child), lease duration must exceed process timeout or double-execution occurs, and the MCP server transport must be HTTP-on-localhost rather than stdio to avoid corrupting the daemon's output streams. All three risks are well-understood and have straightforward preventions that must be addressed before the relevant phases ship.
+The primary risk is the SDK mode transition: `startDaemon()` was designed as a CLI entry point, and exposing it as a library surface requires deliberate decisions about signal handler ownership, in-flight worker drain on `stop()`, and stable public types that do not leak internal storage layer shapes. These are not hard problems, but they must be addressed before the SDK is promoted as a public API. Secondary risk is schema validation enforcement mode — strict validation on an existing unvalidated pipeline will break every existing agent on first rollout unless a warn-first strategy is adopted.
 
 ## Key Findings
 
 ### Recommended Stack
 
-Four of five v1.1 features require zero new dependencies — they are wired using Node.js 22+ built-ins already in use. Only two new production packages are needed: `pino ^9.0.0` for structured daemon logging (de facto standard, no transitive deps, native ESM, child-logger support ideal for per-delivery context) and `@modelcontextprotocol/sdk ^1.0.0` for the embedded MCP server (official Anthropic SDK, TypeScript-first, includes `StreamableHTTPServerTransport`). The existing `yaml` and `zod` dependencies are unchanged and should be leveraged for MCP tool input schema derivation.
+Three of four v1.2 features are built from existing dependencies: Zod v4's `z.registry()` and `z.toJSONSchema()` cover the schema registry, the `package.json` `"exports"` field covers SDK packaging, and ESM dynamic `import()` covers plugin loading. Only the web dashboard adds new production dependencies. `hono` (^4.12.8) and `@hono/node-server` (^1.19.11) are the right choice — ultralight (7.6 kB gzipped, zero transitive dependencies), Web Standards-first, ESM-native, and 3.5x faster than Express. No frontend build step is needed; a single-file vanilla HTML dashboard is sufficient for v1.2 operator visibility. One open question: manifest-declared JSON Schema validation may require `ajv` as an additional dependency, but this can be deferred by scoping the schema registry to SDK-mode programmatic registration (Zod only) for v1.2.
 
 **Core technologies:**
-- `node:child_process` (built-in): process spawning with SIGTERM/SIGKILL timeout escalation — already used, extend for process group kill
-- `node:sqlite` WAL mode (built-in): concurrent access safe; single `DatabaseSync` connection sufficient for up to ~8 workers since real parallelism is at OS child-process level
-- `pino ^9.0.0`: structured NDJSON daemon logging — no transitive deps, ESM-compatible, `pino.child()` for per-delivery context; verify version with `npm show pino version`
-- `@modelcontextprotocol/sdk ^1.0.0`: `McpServer` + `StreamableHTTPServerTransport` for localhost HTTP MCP endpoint; verify `StreamableHTTPServerTransport` import path before implementation
-- `node:net` `server.listen(0)` (built-in): OS-assigned free port for MCP HTTP server
-- `Promise.allSettled` (built-in): N-slot concurrent worker pool coordination
-
-**Note:** ARCHITECTURE.md recommends a custom internal logger with no external dependency (zero-dep philosophy); STACK.md recommends `pino`. Resolution: the features research confirms `pino` is consistent with the existing `yaml`/`zod` dep pattern. Use `pino` for production quality; the internal logger interface from ARCHITECTURE.md should be used as the abstraction so the implementation can be swapped.
+- `zod` (^4.3.6, already present): `z.registry()` + `z.toJSONSchema()` for event schema registry — Zod v4 built-ins replace any need for external schema tools
+- `hono` (^4.12.8, NEW): HTTP framework for web dashboard — minimal, ESM-native, no build pipeline required
+- `@hono/node-server` (^1.19.11, NEW): Node.js adapter for Hono — required companion for Node.js 22+
+- `package.json "exports"` (Node.js built-in): SDK sub-path entry points — standard, no library
+- ESM `import()` (Node.js 22+ built-in): Plugin adapter loading at daemon startup — no loader library needed
 
 ### Expected Features
 
-**Must have (table stakes) — production daemon safety requirements:**
-- **Process timeout enforcement** — hung AI agents block lease slots indefinitely without it; mechanism exists in `process-runner.ts` but is never configured from the manifest
-- **Structured logging (daemon internals)** — raw text is unqueryable; operators cannot correlate events across concurrent deliveries without structured fields (deliveryId, agentId, runId, level, ts)
-- **Env isolation (spawned processes)** — current `...process.env` spread leaks daemon API keys and shell state into every agent process; this is a security and reproducibility failure
-- **Concurrent workers** — single sequential loop processes one delivery at a time; long-running agents (10+ min) starve all other ready deliveries
+**Must have (table stakes):**
+- **SDK/library mode (`startDaemon()` as public API)** — any embeddable tool needs a stable programmatic entry point; `daemon/index.ts` is mostly the right shape; gap is `package.json exports`, TypeScript declarations, stable public types, and surface audit
+- **Plugin adapter system (external runtimes loaded by manifest)** — the closed `switch` in `registry.ts` forces a core fork to add any fifth adapter; plugin loading via ESM `import()` with an open `Map`-based registry is the correct fix
+- **Event schema registry (per-topic payload validation)** — payloads are currently `Record<string, unknown>` with no validation; mismatches fail silently deep in agent execution far from the publish site
+- **Deprecate `events[]` in result envelope** — MCP `publish_event` replaced this in v1.1; two competing patterns create confusion; warn-only in v1.2, remove in v1.3
 
 **Should have (differentiators):**
-- **MCP server embedded in daemon** — agents that are LLM sessions (Gemini, Codex) can publish follow-up events via MCP tools instead of writing a result envelope; removes the need for agents to implement the work package contract format
-- **Timeout discrimination in dead-letter** — timeout result distinguished from crash (not just generic signal exit) enables instant triage
+- **Web dashboard (local HTTP + static UI)** — turns a CLI-only black box into something observable in real time; `OperatorService` already exposes the full query surface; Hono + vanilla HTML avoids a frontend build pipeline
+- **SDK: programmatic publish + subscribe for test harnesses** — integration tests currently must spawn a real daemon process; an importable `startDaemon` with `registerSignalHandlers: false` enables in-process workflow testing
 
-**Defer (v2+):**
-- Log aggregation / CloudWatch / Loki integration — local-first tool; NDJSON to stderr is operator-greppable
-- Web dashboard — stated out of scope; CLI-first
-- MCP authentication — localhost-only; no network exposure in v1.1
-- Dynamic worker pool scaling — static `--concurrency N` at startup is sufficient
-- `events` array deprecation in result envelope — keep backward-compat in v1.1; deprecate in v1.2 after MCP adoption is observed
+**Defer to v1.3+:**
+- Dashboard approval actions (approve/reject from browser) — CLI remains the approval UI; safety-critical decisions belong in CLI, not a browser tab
+- Schema backward-compatibility checking (Confluent-style) — Kafka-grade complexity for a single-repo local tool
+- npm publish / release automation — out of scope for local-first solo developer tooling
+- Dashboard authentication for LAN access — localhost binding is sufficient for v1.2
+- Plugin hot-reload — ESM module cache is permanent per process; restart is the correct model
 
 ### Architecture Approach
 
-The v1.1 architecture is an extension of the existing composition root pattern (`startDaemon()` in `daemon/index.ts`) with two new files and targeted modifications to existing modules. No new storage layer changes are required — all five features plug into existing seams. The key principle is that CLI-facing operator output (`cli/output.ts` to stdout) and daemon internal observability (structured logger to stderr) are two separate concerns that must never be merged. The MCP server must use HTTP localhost transport, not stdio, because the daemon process's stdio is already spoken for.
+All four v1.2 features are additive to the existing composition root in `daemon/index.ts`. No new SQLite stores are needed. Five files are new (`plugin-adapter.ts`, `schema-registry.ts`, `sdk/index.ts`, `sdk/embed.ts`, `dashboard/server.ts` + supporting files) and five existing files require targeted modifications (`registry.ts`, `manifest-schema.ts`, `daemon/index.ts`, `publish-event.ts`, `contract.ts`). The dashboard embeds in the daemon process to share the single SQLite connection and avoid WAL lock contention from a second writer; the dashboard's read queries use a separate read-only connection with `PRAGMA query_only = ON`.
 
-**Major components (new or modified for v1.1):**
-1. `config/manifest-schema.ts` [MODIFY] — add `timeoutMs`, `envMode`, `mcpServer` config fields to `AgentSchema`; all other features read from here
-2. `shared/logger.ts` [NEW] — structured JSON logger factory; `Logger` interface with `child()` for per-delivery context; writes to stderr
-3. `daemon/worker-pool.ts` [NEW] — N-slot concurrent poll loop; slots share single `DatabaseSync` connection safely because child-process execution is the real parallelism
-4. `daemon/mcp-server.ts` [NEW] — `StreamableHTTPServerTransport` on `127.0.0.1:PORT`; tools derive input schemas from existing Zod types; URL injected as `AGENT_BUS_MCP_URL` in work packages
-5. `adapters/process-runner.ts` [MODIFY] — SIGTERM to process group (`-child.pid`), SIGKILL after grace period, env isolation per `envMode`
-6. `daemon/adapter-worker.ts` [MODIFY] — pass `timeoutMs` from manifest into `ProcessMonitorCallbacks`, inject `mcpServerUrl` into work packages, emit structured log events
+**Major components:**
+1. `src/adapters/plugin-adapter.ts` (NEW) — `PluginAdapterDefinition` interface; open `Map`-based registry replaces the closed `SupportedRuntimeFamilySchema` enum in `registry.ts`
+2. `src/daemon/schema-registry.ts` (NEW) — per-topic Zod schema map with warn/reject enforcement modes; validation fires before the SQLite transaction in `publish-event.ts`
+3. `src/sdk/index.ts` + `src/sdk/embed.ts` (NEW) — re-exports of stable public types + thin `createAgentBusEmbed` wrapper; zero new daemon logic
+4. `src/dashboard/server.ts` + `src/dashboard/api-routes.ts` + `src/dashboard/ui/` (NEW) — Hono HTTP server delegating to existing `OperatorService` and `ApprovalService`; vanilla HTML single-file UI
+5. `src/config/manifest-schema.ts` (MODIFY) — add `schemas[]` and `adapters.plugins[]` sections; this is the shared seam all features read from
 
 ### Critical Pitfalls
 
-1. **SIGTERM kills only the direct child, not the subprocess tree** — grandchildren (e.g., shell wrappers spawning the real agent binary) survive; use `process.kill(-child.pid, "SIGTERM")` to signal the entire process group; follow up with `SIGKILL` after 5s grace; clear the result file after timeout kill to prevent stale reads by the retry attempt.
+1. **Signal handler registration in SDK/embedded mode** — `startDaemon()` registers `process.once("SIGINT/SIGTERM")` by default; in Jest/Vitest test harnesses this fires during teardown and kills the runner mid-suite. Prevention: default `registerSignalHandlers: false` in SDK mode; add a `createDaemonForProcess()` factory for CLI use that explicitly opts into signal handlers.
 
-2. **Lease duration shorter than process timeout causes double execution** — if `leaseDurationMs < processTimeoutMs + graceMs`, recovery-scan reclaims the lease while the original agent is still running; enforce `leaseDurationMs > timeoutMs + graceMs` as a startup validation with a clear error message.
+2. **Internal storage types leaked as the public SDK API** — `AgentBusDaemon` was designed for internal composition; `ReturnType<...>` chains over store primitives become breaking changes on any field rename once external. Prevention: define `src/sdk/types.ts` with stable public shapes (`DeliveryRecord`, `RunSummary`) and map internal types at the `startDaemon` boundary; never export `PersistedDeliveryRecord` or storage-derived types.
 
-3. **MCP stdio transport corrupts daemon output streams** — if stdio transport is used for the embedded MCP server, any `console.log` or structured log line to stdout breaks MCP JSON-RPC framing for connected clients; use `StreamableHTTPServerTransport` on localhost; structured logging must write to stderr only.
+3. **Schema validation rejects existing agents on rollout** — strict Zod/Ajv validation on an unvalidated pipeline dead-letters every existing agent on first publish after the registry is enabled. Prevention: warn mode first (`schemaEnforcement: "warn" | "reject"` per topic in manifest); `.passthrough()` default on all registry schemas; strict enforcement is opt-in per topic.
 
-4. **Hung SQLite transaction after unhandled rejection in MCP handler** — concurrent MCP tool calls that crash mid-transaction leave the shared `DatabaseSync` connection in a `BEGIN` state; all subsequent queries fail with "cannot start a transaction within a transaction"; wrap all transaction boundaries in a `withTransaction(db, fn)` helper that guarantees `ROLLBACK` on any throw; add top-level try/catch in all MCP request handlers.
+4. **Closed `SupportedRuntimeFamilySchema` enum silently bypasses plugin `buildCommand()`** — user-defined runtime families fall through to `buildGenericManifestCommand()` without calling the plugin's custom builder; no error, just wrong behavior. Prevention: replace the closed enum with an open `Map<string, PluginAdapterDefinition>`; add startup validation that every manifest `runtime` has a registered adapter.
 
-5. **Env isolation strips PATH, breaking executable resolution** — `gemini`, `codex`, `opencode` are resolved via PATH at spawn time; a strict allowlist that omits PATH causes `ENOENT` on every agent spawn, manifesting as dead-lettered deliveries; PATH is a mandatory passthrough in `envMode: "isolated"`; consider resolving to absolute paths at daemon startup to eliminate runtime PATH dependency.
+5. **SSE connections prevent `daemon.stop()` from resolving** — `http.Server.close()` does not terminate existing keep-alive or SSE connections; test teardown hangs indefinitely if a browser tab holds the dashboard open. Prevention: call `server.closeAllConnections()` (Node.js 18.2+) before `server.close()` during shutdown; add a 3-second fallback timeout.
 
 ## Implications for Roadmap
 
 Based on combined research across all four files, the dependency graph is clear and the phase structure follows naturally.
 
-### Phase 1: Foundation Safety (Manifest Schema + Process Timeouts + Env Isolation)
+### Phase 1: Plugin Adapter System
 
-**Rationale:** These three changes are low-complexity, have no inter-feature dependencies, and address the most critical production safety gaps. The manifest schema changes are a prerequisite for all other features — they must land first. Process timeouts and env isolation are targeted single-file plumbing changes that validate the manifest-first approach. All three share the same files (manifest-schema.ts, process-runner.ts, registry.ts) so they belong in one phase.
+**Rationale:** Lowest implementation risk. Pure interface addition plus registry refactor — no behavior change for existing built-in adapters. Unblocks all subsequent work that depends on the manifest schema extension (`adapters.plugins[]`). Also has the most "silent wrong behavior" failure mode (Pitfall 11) that must be fixed before the registry pattern is relied on by other phases.
+**Delivers:** Open `Map`-based adapter registry; `PluginAdapterDefinition` interface exported from `src/adapters/plugin-adapter.ts`; manifest `adapters.plugins[]` support; ESM `import()` plugin loading at daemon startup; startup validation that every manifest `runtime` has a registered adapter.
+**Addresses:** Plugin adapter system (table stakes), removes need to fork core for custom runtimes.
+**Avoids:** Pitfall 4 (ESM cache — document constraint before implementation), Pitfall 9 (plugin contract prohibiting `process.exit()`), Pitfall 11 (closed enum silent bypass — this phase fixes it), Pitfall 15 (unregistered runtime silent fallback — startup validation).
 
-**Delivers:** A daemon safe to run unattended — agent processes cannot hang indefinitely, daemon secrets do not leak to agents, and timeout configuration is per-agent in the manifest.
+### Phase 2: Event Schema Registry
 
-**Addresses (from FEATURES.md):** Process timeout enforcement, env isolation.
+**Rationale:** Isolated new component with a single well-defined integration point. Fully opt-in — existing manifests without `schemas[]` are unaffected. Delivers immediate safety value by catching payload mismatches at publish time. Can be developed in parallel with Phase 3 but benefits from Phase 1's manifest schema extension being committed.
+**Delivers:** `SchemaRegistry` interface in `src/daemon/schema-registry.ts`; per-topic Zod schema map; `warn`/`reject` enforcement modes per topic; manifest `schemas[]` section; `daemon.registerSchema()` on the `AgentBusDaemon` facade for SDK callers; validation fires pre-transaction in `publish-event.ts`.
+**Uses:** Zod v4 `z.registry()` and `z.toJSONSchema()` — already in dependencies, no new packages (unless JSON Schema + `ajv` path is in scope).
+**Avoids:** Pitfall 3 (strict validation rollout — warn mode first; `.passthrough()` default), Pitfall 8 (JSON Schema vs Zod — use Zod for programmatic; defer `ajv` decision), Pitfall 12 (validation inside transaction — validate before `BEGIN`; compile validators once at startup).
 
-**Avoids (from PITFALLS.md):** Pitfall 1 (subprocess tree kill), Pitfall 3 (lease/timeout invariant), Pitfall 4 (env pollution), Pitfall 10 (PATH in isolation mode).
+### Phase 3: SDK / Library Mode
 
-**Research flag:** Standard patterns — no further research phase needed. Direct codebase changes with well-understood Node.js primitives.
+**Rationale:** Re-exports and thin wrapper, zero new daemon logic. Ships after the plugin system and schema registry are validated so the public API surface reflects a complete and stable `startDaemon` interface. This phase also implements the `stop()` drain fix which is a pre-condition for Phase 4 (dashboard shutdown tests are meaningless without a draining `stop()`).
+**Delivers:** `package.json "exports"` map with `"."` and `"./sdk"` subpaths; `src/sdk/index.ts` re-exports; `src/sdk/embed.ts` `createAgentBusEmbed` wrapper; `src/sdk/types.ts` stable public shapes decoupled from storage internals; `registerSignalHandlers: false` as SDK default; `stop()` drain via `Promise.allSettled(activeWorkers)` before `database.close()`; documented public surface.
+**Avoids:** Pitfall 1 (signal handlers — default false; `createDaemonForProcess` factory for CLI), Pitfall 2 (internal types leaked — `src/sdk/types.ts` stable boundary), Pitfall 7 (`stop()` drain — this phase fixes it), Pitfall 13 (dual-instance — ESM-only, no CJS entry point).
 
----
+### Phase 4: Web Dashboard
 
-### Phase 2: Structured Logging
+**Rationale:** Highest new code surface area. Deferred until `stop()` drain is in place (Phase 3) so that dashboard SSE shutdown tests are meaningful. The data layer (`OperatorService`, `ApprovalService`) has been exercised by Phase 1-3 testing, providing confidence before the dashboard reads from it.
+**Delivers:** `src/dashboard/server.ts` Hono HTTP server on a separate port; `src/dashboard/api-routes.ts` REST routes (`GET /api/runs`, `/api/runs/:id`, `/api/approvals`, `/api/failures`); `src/dashboard/ui/index.html` vanilla JS single-file UI; optional SSE event stream from dispatcher; manifest `dashboard: { enabled, port }` config; `dashboardUrl` on `AgentBusDaemon` facade; separate read-only SQLite connection with `PRAGMA query_only = ON`.
+**Uses:** `hono` ^4.12.8 + `@hono/node-server` ^1.19.11 — the only new production dependencies in the entire v1.2 scope.
+**Avoids:** Pitfall 5 (port conflict — `Promise.all` startup; fail fast if dashboard port == MCP port; cleanup both on failure), Pitfall 6 (shared write connection — dedicated read-only connection), Pitfall 10 (SSE prevents stop — `server.closeAllConnections()` before `server.close()`), Pitfall 14 (stale reads — document WAL snapshot isolation; add "last updated" timestamp to responses).
 
-**Rationale:** Logging is additive-only (no behavior changes), which means it carries the lowest regression risk of any phase. It must precede concurrent workers because concurrent output without per-slot worker IDs in structured fields is impossible to debug. The transport decision (stderr only, never stdout) must be locked before this phase because it affects MCP server architecture.
+### Phase 5: Deprecate `events[]` in Result Envelope
 
-**Delivers:** Queryable NDJSON daemon logs with correlation fields (deliveryId, agentId, runId, level, ts) and a `Logger` interface that all subsequent phases consume.
-
-**Uses (from STACK.md):** `pino ^9.0.0` (verify version); `Logger` interface abstraction from ARCHITECTURE.md.
-
-**Implements (from ARCHITECTURE.md):** `shared/logger.ts`; integration into `startDaemon()`, `AdapterWorker`, `RecoveryScan`.
-
-**Avoids (from PITFALLS.md):** Pitfall 5 (test breakage — audit string assertions before implementation; inject transport in tests), Pitfall 7 (stdout corruption — stderr only), Pitfall 9 (sync write bottleneck — use async stream).
-
-**Research flag:** Standard patterns — pino is well-documented. Pre-implementation step: audit test files for string-matching on log output; inject pluggable test transport.
-
----
-
-### Phase 3: Concurrent Workers
-
-**Rationale:** Builds on stable Phase 1 (manifest changes) and Phase 2 (structured logging for per-slot context). The new `worker-pool.ts` is a contained new file with minimal modification to existing code. The single `DatabaseSync` connection is safe for concurrent use because SQLite operations serialize on the JS call stack and child-process execution is the real parallelism.
-
-**Delivers:** `--concurrency N` CLI flag (default 1, backward-compatible); up to N agent processes running simultaneously; graceful drain on `daemon.stop()`.
-
-**Uses (from STACK.md):** `Promise.allSettled`, `node:sqlite` WAL mode — no new dependencies.
-
-**Implements (from ARCHITECTURE.md):** `daemon/worker-pool.ts`; `worker-command.ts` CLI flag addition; drain-aware `stop()`.
-
-**Avoids (from PITFALLS.md):** Pitfall 2 (single connection serialization — document, not a bug at N≤8), Pitfall 8 (recovery-scan / worker lease race — existing WHERE clause is safe; do not relax it), Pitfall 11 (false concurrency safety — atomic UPDATE claim must retain status constraint), Pitfall 14 (DB close while workers mid-flight — drain `Set<Promise>` before `database.close()`).
-
-**Research flag:** Standard patterns — concurrent async slots over a single shared SQLite connection is a known pattern. No external research needed.
-
----
-
-### Phase 4: Embedded MCP Server
-
-**Rationale:** Largest new surface area; requires all prior phases to be stable before touching work package schema and daemon lifecycle. The `@modelcontextprotocol/sdk` import paths and `StreamableHTTPServerTransport` availability must be verified before implementation begins. Derives MCP tool input schemas from existing Zod domain types to prevent schema drift.
-
-**Delivers:** `AGENT_BUS_MCP_URL` env var injected into work packages; agents can publish events, fetch delivery context, and list artifacts via MCP tool calls during execution; result envelope `events` array becomes optional (not deprecated until v1.2).
-
-**Uses (from STACK.md):** `@modelcontextprotocol/sdk ^1.0.0`, `node:net` `server.listen(0)`, existing `zod` schemas for tool input validation.
-
-**Implements (from ARCHITECTURE.md):** `daemon/mcp-server.ts`; `mcpUrl` field in work package `workspace` object; `getDelivery()` method on daemon facade; `mcpServer` config in `StartDaemonOptions`.
-
-**Avoids (from PITFALLS.md):** Pitfall 6 (hung transaction — `withTransaction` helper; top-level handler catch), Pitfall 7 (stdio conflict — HTTP transport, locked in Phase 2), Pitfall 13 (schema drift — derive from existing Zod schemas).
-
-**Research flag:** NEEDS research-phase verification before implementation: confirm `StreamableHTTPServerTransport` class name and import path in current SDK version (`npm show @modelcontextprotocol/sdk version`; review SDK changelog or source). Confirm `pino ^9` ESM import syntax works with `"type": "module"` (also applies to Phase 2 but most critical here).
-
----
+**Rationale:** Lowest risk change in the entire v1.2 scope — one structured log line plus a schema variant addition in `contract.ts`. Placed last because it is fully independent of all other phases and benefits from Phase 3's SDK types work (the result envelope schema is part of the public surface). Clean up last, after everything else is validated.
+**Delivers:** Structured deprecation warning in `adapter-worker.ts` when `events.length > 0`; `schemaVersion: 2` result envelope variants in `contract.ts` without the `events` field; documentation marking `events` as deprecated with v1.3 removal target.
+**Addresses:** Legacy cleanup of the `events[]` pattern superseded by MCP `publish_event` in v1.1.
 
 ### Phase Ordering Rationale
 
-- Manifest schema changes are the foundation; no feature can land without them.
-- Safety features (timeout, env isolation) before observability because they are simpler and reduce risk before we touch many files.
-- Structured logging before concurrent workers because concurrent output is undebuggable without correlation fields.
-- MCP server last because it has the largest blast radius (new dependency, new lifecycle, work package schema change, daemon facade change) and benefits most from all prior phases being stable.
-- This order is consistent across all three research files (FEATURES.md, ARCHITECTURE.md recommend the same sequence independently).
+- **Manifest schema first (within Phase 1):** `manifest-schema.ts` is the shared seam for all four feature areas; its changes must be backward-compatible and land before downstream phases read from them.
+- **Interface definitions before wiring:** `PluginAdapterDefinition` and `SchemaRegistry` interfaces are defined and independently testable before `daemon/index.ts` is modified to wire them.
+- **SDK before dashboard:** `stop()` drain must be fixed in Phase 3 before Phase 4 SSE shutdown tests are meaningful. Dashboard also benefits from stable public types defined in Phase 3.
+- **Dashboard last:** Largest new code surface; depends on all other phases being stable; no features depend on the dashboard.
+- **Deprecation any time:** `events[]` deprecation is fully independent; Phase 5 placement is preference, not a dependency constraint.
+- This order is consistent across all three research files — FEATURES.md, ARCHITECTURE.md, and PITFALLS.md independently converge on the same sequence.
 
 ### Research Flags
 
-Phases needing deeper research during planning:
-- **Phase 4 (MCP Server):** `StreamableHTTPServerTransport` import path must be verified against the installed SDK version before writing any code. Run `npm show @modelcontextprotocol/sdk` and inspect the package's `exports` map. The `McpServer.registerTool()` vs `server.tool()` API surface also needs verification.
-- **Phase 2 (Structured Logging):** Run `npm show pino version` to confirm ^9.x is current stable before adding to `package.json`. Confirm ESM import (`import pino from 'pino'`) works with `"type": "module"`.
+Phases likely needing deeper research during planning:
+- **Phase 4 (Web Dashboard):** SSE dispatcher integration needs verification — `createDispatcher()` has a `snapshot()` method but delivery state change event hooks are not confirmed in the source. Verify `src/daemon/dispatcher.ts` before designing the SSE endpoint; if no event hooks exist, add a lightweight emitter to the dispatcher. Also confirm `server.closeAllConnections()` behavior within the `@hono/node-server` adapter (may require manual connection tracking).
+- **Phase 2 (Schema Registry) — JSON Schema path:** If manifest-declared JSON Schema validation is in scope for v1.2 (vs SDK-only Zod registration), verify `ajv` v8+ ESM compatibility with `"type": "module"` on Node.js 22.12+ before adding the dependency.
 
 Phases with standard patterns (skip research-phase):
-- **Phase 1 (Foundation Safety):** All changes are in-codebase plumbing with Node.js built-ins. No external research needed.
-- **Phase 3 (Concurrent Workers):** `Promise.allSettled` slot pool is a well-documented pattern. SQLite WAL behavior is documented in Node.js 22 experimental API docs.
+- **Phase 1 (Plugin Adapter System):** ESM `import()` and `Map`-based registry are well-documented Node.js 22+ patterns. Direct codebase read confirms the exact seam to modify.
+- **Phase 3 (SDK Mode):** `package.json "exports"` and TypeScript `declaration: true` are established standards. The `startDaemon` interface is already correct — work is surfacing and documenting, not inventing.
+- **Phase 5 (Deprecation):** One log line and a schema variant. No research needed.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH (core) / MEDIUM (new deps) | Zero-dep features verified via direct codebase read. Pino version and MCP SDK transport API unverified against live npm — verify before install. |
-| Features | HIGH | All gaps confirmed by direct codebase read of the specific lines where the gap exists. Feature list is internally consistent across FEATURES.md and ARCHITECTURE.md. |
-| Architecture | HIGH | Component map derived from direct source analysis of all relevant files. Build order validated by cross-referencing FEATURES.md, ARCHITECTURE.md, and PITFALLS.md independently — all three agree. |
-| Pitfalls | HIGH (Node.js/SQLite) / MEDIUM (MCP) | Process group kill, lease invariant, env isolation, SQLite serialization — all well-documented platform behavior. MCP embedding patterns are newer; transport strategy (HTTP vs stdio) is the main uncertainty, resolved by choosing HTTP. |
+| Stack | HIGH | All key decisions verified against live npm registry and official docs (Zod v4, Hono). Two new dependencies confirmed at specific versions via npm registry. Zero-dependency decisions verified by direct codebase read. |
+| Features | HIGH | All features verified against direct codebase read. Gap between what exists and what is needed is precisely characterized for each feature. One MEDIUM item: JSON Schema vs Zod for manifest-declared schemas — decision deferred. |
+| Architecture | HIGH | Component map derived from direct analysis of all relevant source files. Build order validated by cross-referencing FEATURES.md, ARCHITECTURE.md, and PITFALLS.md — all three independently agree on the same sequence. One MEDIUM item: dispatcher SSE event hooks not fully verified. |
+| Pitfalls | HIGH (critical), MEDIUM (schema enforcement) | Signal handler, closed enum, SSE shutdown, and internal type leakage pitfalls are platform-level facts with documented behavior. Schema enforcement mode patterns are derived from Confluent/Solace distributed systems docs applied to a local use case. |
 
-**Overall confidence:** HIGH for Phases 1-3. MEDIUM for Phase 4 (MCP) pending SDK API verification.
+**Overall confidence:** HIGH
 
 ### Gaps to Address
 
-- **MCP SDK transport API:** Verify `StreamableHTTPServerTransport` import path (`@modelcontextprotocol/sdk/server/streamableHttp.js`) and `McpServer` tool registration API against the installed version before Phase 4 planning. If the class name or import path differs, the architecture is still correct but code examples in ARCHITECTURE.md/FEATURES.md will need updating.
-- **`pino` ESM compatibility:** Confirm `import pino from 'pino'` resolves correctly in the project's `"type": "module"` ESM build before Phase 2 implementation. Run a minimal smoke test.
-- **`daemon.getDelivery()` facade method:** ARCHITECTURE.md identifies that `AgentBusDaemon` does not expose `getDelivery(deliveryId)` — only `listDeliveriesForEvent()`. A new method is required for the `get_delivery` MCP tool. Minor, but must be in Phase 4 scope.
-- **`list_artifacts` scope definition:** ROADMAP.md mentions `list_artifacts` but does not define query shape (all artifacts vs filtered by topic/delivery). Needs clarification from project owner before Phase 4 implementation.
-- **Logger interface conflict:** STACK.md recommends `pino`; ARCHITECTURE.md designs a custom internal logger. Resolution: use the `Logger` interface from ARCHITECTURE.md as the abstraction (preserving testability and zero-dep spirit in tests) with `pino` as the production backing implementation.
+- **Dispatcher SSE event emission:** ARCHITECTURE.md notes `createDispatcher()` has `snapshot()` but delivery state change emission hooks are not confirmed. Verify in `src/daemon/dispatcher.ts` before designing the Phase 4 SSE endpoint. If no hooks exist, add a lightweight EventEmitter to the dispatcher as part of Phase 4 scope.
+- **`ajv` ESM compatibility decision:** If JSON Schema validation in manifest-declared schemas is in scope for v1.2 (vs SDK-only Zod registration), verify `ajv` v8+ ESM compatibility with Node.js 22.12+ `"type": "module"` before adding the dependency. Recommended: scope the schema registry to Zod-only (programmatic) for v1.2 and defer `ajv` + JSON Schema file path to v1.3.
+- **CSRF protection for dashboard approve/reject routes:** ARCHITECTURE.md raises a CSRF risk for approve/reject API actions even on localhost. A startup-generated random secret token required as a request header would close this. However, FEATURES.md recommends deferring dashboard approval actions to v1.3 entirely — if that deferral holds, this gap disappears for v1.2.
+- **`stop()` drain scope:** Phase 3 adds `Promise.allSettled(activeWorkers)` drain to `stop()`. This is also a latent correctness issue for the CLI daemon (not just SDK mode). Confirm whether fixing drain for the CLI daemon is acceptable as part of Phase 3, or whether it should be scoped strictly to SDK mode.
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- Direct codebase: `src/adapters/process-runner.ts` — timeout hook at line 44/130-133; env spread at lines 94-97
-- Direct codebase: `src/cli/worker-command.ts` — sequential single-worker loop
-- Direct codebase: `src/config/manifest-schema.ts` — confirmed absence of `timeoutMs`, `envMode`, MCP fields
-- Direct codebase: `src/adapters/registry.ts` — `buildBaseEnvironment()` env merge behavior
-- Direct codebase: `src/daemon/index.ts`, `src/daemon/adapter-worker.ts`, `src/daemon/delivery-service.ts`, `src/daemon/recovery-scan.ts`, `src/storage/delivery-store.ts`
-- `.gsd/ROADMAP.md` — authoritative MCP server design intent
-- MCP transport specification: https://modelcontextprotocol.io/docs/concepts/transports
-- MCP TypeScript server quickstart: https://modelcontextprotocol.io/quickstart/server
-- Node.js child_process documentation — process group signal behavior
+- `src/daemon/index.ts` — `startDaemon`, `AgentBusDaemon` interface, signal handler registration
+- `src/adapters/registry.ts` — closed `SupportedRuntimeFamilySchema` enum, `buildAdapterCommand` switch
+- `src/adapters/vendors/claude-code.ts` — `VendorAdapterCommandInput` contract shape
+- `src/adapters/contract.ts` — `events[]` field, result envelope schemas
+- `src/daemon/publish-event.ts` — event publish pipeline, transaction boundary
+- `src/daemon/operator-service.ts` — `listRunSummaries`, `getRunDetail`, `listPendingApprovalViews`, `listFailureDeliveries`
+- `src/config/manifest-schema.ts` — current manifest shape, confirmed absence of `schemas[]` and `plugins[]`
+- https://zod.dev/v4 — Zod v4 release notes; `z.toJSONSchema()` and `z.registry()` confirmed
+- https://zod.dev/metadata — Zod metadata/registry API confirmed
+- https://www.npmjs.com/package/hono — version 4.12.8 confirmed
+- https://www.npmjs.com/package/@hono/node-server — version 1.19.11 confirmed
+- https://hono.dev/docs/getting-started/nodejs — Hono Node.js integration confirmed
 
 ### Secondary (MEDIUM confidence)
-- pino npm: https://www.npmjs.com/package/pino — version ^9.x unverified against live registry
-- `@modelcontextprotocol/sdk` npm: https://www.npmjs.com/package/@modelcontextprotocol/sdk — `StreamableHTTPServerTransport` import path unverified against installed version
+- https://docs.confluent.io/platform/current/schema-registry/ — schema enforcement mode patterns (warn vs reject)
+- https://docs.solace.com/Schema-Registry/schema-registry-best-practices.htm — schema registry best practices
+- https://theburningmonk.com/2025/04/event-versioning-strategies-for-event-driven-architectures/ — JSON Schema vs Zod format trade-offs
+- https://github.com/openai/openai-agents-js/issues/175 — signal handler SDK pitfall precedent
 
-### Tertiary (LOW confidence)
-- None
+### Tertiary (informational)
+- https://hono.dev/docs/helpers/streaming — Hono SSE `streamSSE` API
+- https://nodejs.org/api/esm.html — ESM module cache behavior (platform invariant)
+- https://levelup.gitconnected.com/hono-vs-express-vs-fastify-the-2025-architecture-guide-for-next-js-5a13f6e12766 — Hono vs Express vs Fastify performance comparison
 
 ---
-*Research completed: 2026-03-14*
+*Research completed: 2026-03-17*
 *Ready for roadmap: yes*

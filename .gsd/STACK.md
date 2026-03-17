@@ -1,252 +1,220 @@
-<!-- AUTO-GENERATED from .planning/research/STACK.md by scripts/sync-planning-to-gsd.mjs. source-sha256: 98997e699eecc389970d91475afa48f4bfc2764098caff19c2d6a4552853dfe7. Edit the source file, not this projection. -->
+<!-- AUTO-GENERATED from .planning/research/STACK.md by scripts/sync-planning-to-gsd.mjs. source-sha256: cbc1735b6e76d2c6f23bd99ecc2852396a0da148a72058ba2b179b8ec3d6e214. Edit the source file, not this projection. -->
 
 # Technology Stack
 
-**Project:** Agent Bus v1.1 — Production Hardening
-**Researched:** 2026-03-14
-**Scope:** NEW capabilities only — process timeouts, structured logging, concurrent workers, env isolation, embedded MCP server
+**Project:** Agent Bus v1.2 — Developer Experience
+**Researched:** 2026-03-17
+**Scope:** NEW capabilities only — SDK/library mode, event schema registry, web dashboard, plugin adapter system. Zod ^4.3.6, pino ^9.14.0, @modelcontextprotocol/sdk ^1.27.1, yaml, TypeScript, and node:sqlite are already in place and NOT re-researched.
 
 ---
 
 ## Summary
 
-Four of the five v1.1 features require zero new dependencies. They are implemented with Node.js 22+ built-ins already available in the codebase. Only the embedded MCP server requires a new external package.
+Three of the four v1.2 features require zero new dependencies. SDK/library mode, event schema registry, and the plugin adapter system are all built from what is already present: Zod v4's built-in `z.toJSONSchema()` and `z.registry()` cover the schema registry, the `package.json` `"exports"` field and existing `startDaemon`/`AgentBusDaemon` interface cover SDK mode, and the existing `registry.ts` switch pattern can be extended into a plugin contract without adding a loader library. Only the web dashboard requires adding a new dependency.
 
-The existing zero-external-dep philosophy should be maintained everywhere possible. Add `@modelcontextprotocol/sdk` as the sole new production dependency.
+The current `"type": "module"` project structure and Node.js 22.12+ runtime support everything needed without introducing a build pipeline or transpilation step for the dashboard.
 
 ---
 
 ## Feature-by-Feature Stack Decisions
 
-### 1. Process Timeouts
+### 1. SDK/Library Mode
 
-**Decision: No new dependency. Wire existing `timeoutMs` field.**
+**Decision: No new dependency. Add `"exports"` field to `package.json` and a public `src/index.ts` entry point.**
 
-The infrastructure already exists. `ProcessMonitorCallbacks.timeoutMs` (process-runner.ts line 44) triggers `child.kill("SIGTERM")` after the configured duration. The gap is upstream configuration:
-
-- `AgentSchema` in `manifest-schema.ts` does not yet have a `timeoutMs` field.
-- The worker loop in `worker-command.ts` does not yet pass `timeoutMs` into the `ProcessMonitorCallbacks`.
-- No SIGKILL escalation exists if SIGTERM is ignored (common with editor-mode CLIs like Gemini).
+`startDaemon()` and `AgentBusDaemon` in `src/daemon/index.ts` already constitute a well-shaped programmatic API. The daemon accepts injected loggers, monitors, database paths, and signal handler opt-outs. What is missing is a stable, documented public surface.
 
 **Implementation path:**
-- Add `timeoutMs?: number` to `AgentSchema` in manifest-schema.ts (per-agent timeout).
-- Pass the agent's timeout into `ProcessMonitorCallbacks.timeoutMs` in adapter-worker.ts.
-- Add SIGKILL escalation: after SIGTERM, wait `graceMs` (e.g. 5s), then `child.kill("SIGKILL")`.
+- Add `"main"` and `"exports"` fields to `package.json` pointing to `dist/index.js` and `dist/index.d.ts` for TypeScript consumers.
+- Create `src/index.ts` that re-exports `startDaemon`, `AgentBusDaemon`, domain types (`EventEnvelope`, `ArtifactRef`), schema types (`AgentBusManifest`), and contract types (`AdapterWorkPackage`, `AdapterResultEnvelope`).
+- Do NOT export storage internals, delivery store primitives, or daemon-internal helpers. Public API = `startDaemon` + types only.
+- `registerSignalHandlers: false` option already exists for embedding scenarios. Expose this clearly in SDK docs.
 
-**Node.js APIs used:** `setTimeout`, `clearTimeout`, `child.kill()` — all in `node:child_process` + built-in timers. No library.
+**Node.js API used:** `"exports"` field in `package.json` — built into Node.js module resolution, no library. TypeScript `declaration: true` already configured in `tsconfig.json`.
 
-**Confidence: HIGH** — existing implementation visible in source.
-
----
-
-### 2. Structured Logging
-
-**Decision: Add `pino` ~^9.x as the daemon's internal logger.**
-
-**Why pino:**
-- De facto standard for Node.js structured (newline-delimited JSON) logging.
-- Single production dependency: `pino` has no transitive runtime dependencies of its own in v9.
-- Tiny API surface: `const log = pino(); log.info({ deliveryId }, "Claimed delivery")`.
-- Outputs NDJSON to stdout by default — pipeable to `pino-pretty` for development, or to log aggregators in CI/ops contexts.
-- Compatible with ESM `"type": "module"` projects (full ESM support since pino 8).
-- `pino.child({ workerId })` creates child loggers with inherited context — fits worker-per-delivery pattern perfectly.
-
-**Why not roll custom JSON logger:**
-- Naively serializing `JSON.stringify` to stderr is fragile — no level filtering, no caller context, no child logger scoping. Pino solves all of these with battle-tested correctness.
-
-**Why not winston:**
-- Winston has many transitive dependencies, is larger, and slower. Not the right fit for a minimal local daemon.
-
-**Scope of change:**
-- Add `pino` to `dependencies` in `package.json`.
-- Create `src/shared/logger.ts` with a factory that produces a root logger.
-- Replace `console.log`/`io.stdout.write` daemon-internal output with structured log calls.
-- Agent process output (stdout/stderr piped to `.log` files) is NOT structured — agents are external processes and their log format is not controlled. Leave agent log files as-is.
-
-**Version:** pino ^9.0.0 (v9 is current stable as of 2025; full ESM support, no breaking changes expected in minor versions).
-
-**Confidence: MEDIUM** — version based on training data knowledge of pino 9 release timeline (2024). Verify exact latest with `npm show pino version` before installing.
+**Confidence: HIGH** — `startDaemon` and `AgentBusDaemon` examined directly; `"exports"` field is a Node.js standard.
 
 ---
 
-### 3. Concurrent Workers
+### 2. Event Schema Registry
 
-**Decision: No new dependency. Parallel `Promise.allSettled` over N worker iterations.**
+**Decision: No new dependency. Use Zod v4's built-in `z.registry()` and `z.toJSONSchema()`.**
 
-The current `worker-command.ts` runs a single `while` loop polling one delivery at a time. Concurrency means running N simultaneous `runWorkerIteration` calls.
+Zod v4 (currently `^4.3.6` already in `dependencies`) ships:
+- `z.registry<Meta>()` — creates a typed schema registry associating schemas with metadata (title, description, examples, etc.).
+- `z.globalRegistry` — a built-in global registry that `.describe()` populates automatically.
+- `z.toJSONSchema(schema, options?)` — built-in JSON Schema conversion. No `zod-to-json-schema` package needed. As of Zod v4 release (2025), `zod-to-json-schema` is officially deprecated in favor of this.
 
-**Key insight:** SQLite's `DatabaseSync` (node:sqlite) uses WAL mode. Multiple readers are fine. The delivery `claim()` uses a row-level lease — concurrent callers each get a distinct delivery (or null if the queue is empty). This is already safe for parallel use because claim is a write transaction serialized by SQLite.
+**Why Zod v4 over a dedicated schema registry library:**
+- Already a dependency — zero delta.
+- `z.toJSONSchema()` produces Draft 2020-12 JSON Schema natively.
+- Schemas registered in the manifest already use Zod (`AgentBusManifestSchema`, `EventEnvelopeSchema`). The topic-level payload schemas fit naturally alongside these.
+- Type inference works across the registry — schema consumers get TypeScript types automatically.
 
-**Implementation approach:**
-- Add `--concurrency N` flag to the worker command (default: 1 for backward compatibility).
-- Replace the single `while` loop with a slot-based pool: maintain N concurrent async "slots" that each run a polling loop. Each slot: claim → process → ack/fail → repeat or sleep-if-idle.
-- Use `Promise.race` / `Promise.allSettled` to coordinate slots.
-- Worker ID per slot: `${workerId}-slot-${index}` to distinguish lease owners in the DB.
+**Implementation path:**
+- Add an optional `schemas` section to `agent-bus.yaml` manifest (`topic: "plan.created"`, `payloadSchema: ZodObject`).
+- OR allow programmatic registration via `agentBus.registerTopicSchema(topic, zodSchema)` in SDK mode.
+- At publish time, validate `event.payload` against the registered schema for the topic if one exists.
+- Validation failure → `ZodError` → publisher receives structured validation error before the event is persisted.
+- Expose `agentBus.getTopicSchema(topic)` returning the schema and its JSON Schema equivalent (`z.toJSONSchema(schema)`).
 
-**No `node:worker_threads` needed:** Agent processes are already isolated OS processes spawned via `child_process.spawn`. Worker threads would add complexity without benefit — the bottleneck is agent process duration, not JS event loop throughput.
+**What NOT to do:** Do not add `ajv`, `json-schema`, or a dedicated schema registry service. Zod is already present and its v4 feature set covers this exactly.
 
-**Confidence: HIGH** — architecture analysis of existing codebase.
-
----
-
-### 4. Env Isolation
-
-**Decision: No new dependency. Remove `...process.env` spread in process-runner.ts.**
-
-Current behavior in `runPreparedAdapterCommand` (process-runner.ts line 94-97):
-```typescript
-env: {
-  ...process.env,           // ← leaks daemon's full env to every agent
-  ...input.execution.environment
-}
-```
-
-This leaks the daemon's full environment (including `PATH`, auth tokens, API keys, shell vars) into every spawned agent process.
-
-**Isolation strategy:**
-- Provide a minimal base env: `{ PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin", HOME: process.env.HOME ?? "" }`.
-- Let manifest `agent.environment` be the primary mechanism for passing additional vars (already supported).
-- Add an `env_mode` field to `AgentSchema`: `"inherit"` (current behavior, default for backward compat) | `"isolated"` (minimal base only).
-
-**Why keep `PATH`:** Agent executables (gemini, codex) need PATH resolution. A truly empty env breaks `child_process.spawn` for named commands.
-
-**Confidence: HIGH** — directly visible in process-runner.ts line 94-97.
+**Confidence: HIGH** — Zod v4 `z.toJSONSchema()` and `z.registry()` verified against official Zod v4 release notes (zod.dev/v4). Feature confirmed shipped in November 2025 stable release.
 
 ---
 
-### 5. Embedded MCP Server
+### 3. Web Dashboard
 
-**Decision: Add `@modelcontextprotocol/sdk` as new production dependency.**
+**Decision: Add `hono` ^4.12.8 and `@hono/node-server` ^1.19.11 as new production dependencies. Serve inline HTML/CSS/JS with no frontend build step.**
 
-**Why this library:**
-- Official Anthropic-maintained SDK for building MCP servers and clients in TypeScript/Node.js.
-- Provides `Server` class, tool registration (`server.tool()`), and multiple transport implementations.
-- ESM-compatible, TypeScript-first with included type definitions.
-- No heavy transitive dependencies — designed for embedding.
+**Why Hono:**
+- Ultralight HTTP framework (7.6 kB gzipped, zero external dependencies of its own). Fits the project's minimal-dependency philosophy.
+- Web Standards-first (Request/Response API) — runs natively on Node.js 18+ via `@hono/node-server` adapter.
+- Serves JSON APIs (runs, deliveries, approvals) and static HTML from the same Hono app instance.
+- `serveStatic` middleware available from `@hono/node-server/serve-static` for static file serving if assets grow.
+- ESM-compatible, TypeScript-first.
+- Fastest lightweight option verified: 3.5x faster than Express, smaller than Fastify (2.8 MB) at 1.4 MB unpacked.
 
-**Transport choice: `StreamableHTTPServerTransport` (HTTP on localhost random port)**
+**Why NOT Express or Fastify:**
+- Express has no active maintainers and is not ESM-native.
+- Fastify is heavier (2.8 MB unpacked, 178 kB gzipped) and designed for high-throughput APIs — overkill for a local operator dashboard.
 
-The ROADMAP specifies "connection info (stdio/HTTP) passed to agents via work package env vars." For an embedded server in the same daemon process:
+**Why NOT a React/Preact/Svelte SPA with a build step:**
+- Adds Vite, a bundler, and a full frontend build pipeline. This is a local operator dashboard, not a product UI.
+- The dashboard is read-only telemetry: runs, deliveries, approvals, failures. A server-side HTML template is sufficient.
+- `AgentBusDaemon` already has `listRunSummaries()`, `getRunDetail()`, `listPendingApprovalViews()`, `listFailureDeliveries()` — these map directly to HTML endpoints.
 
-- `StdioServerTransport`: Requires the MCP server to be a separate process communicating over stdin/stdout. Cannot be embedded in the daemon process.
-- `StreamableHTTPServerTransport`: Binds to a localhost port. The daemon starts it, picks a random available port, and injects `AGENT_BUS_MCP_URL=http://localhost:{port}` into each agent's work package environment. Agents call the HTTP endpoint to invoke `publish_event`, `get_delivery`, or `list_artifacts`.
+**Dashboard architecture:**
+- Hono app embedded in the daemon, started alongside the MCP server.
+- Serves: `GET /` (run list), `GET /runs/:runId` (run detail), `GET /approvals` (pending approvals), `GET /failures` (dead-letter + retry queue).
+- Returns HTML with inline CSS for non-JS rendering. Optionally adds `htmx.min.js` (CDN-loaded) for live refresh without a build step.
+- Dashboard port separate from MCP port. Inject `AGENT_BUS_DASHBOARD_URL` as informational output on daemon start.
+- Protected by localhost binding only — no auth needed (same model as MCP server).
 
-**Why HTTP over stdio for the embedded case:**
-- Agents are separate processes — they cannot share stdin/stdout with the daemon.
-- HTTP localhost is language-agnostic: any agent (Python, shell, Node) can `curl` or use an MCP client.
-- Port is ephemeral — no config file needed, injected fresh per daemon start.
-- HTTP transport has session management built into the SDK.
+**htmx consideration:**
+- htmx (loaded from CDN, not a dependency) enables partial HTML updates for live dashboards without writing JavaScript or bundling.
+- This is optional and can be added in a later iteration. V1.2 baseline = static HTML, polling refresh via `<meta http-equiv="refresh">` tag if live updates are wanted.
 
-**MCP tools to expose:**
+**Versions confirmed:**
+- `hono` 4.12.8 — confirmed via npm registry (last published 3 hours before research date).
+- `@hono/node-server` 1.19.11 — confirmed via npm registry (last published 2 days before research date).
 
-| Tool | Purpose | Input |
-|------|---------|-------|
-| `publish_event` | Agent publishes follow-up event directly | `topic`, `payload`, `artifactRefs?`, `dedupeKey?` |
-| `get_delivery` | Agent fetches its own delivery context | `deliveryId` |
-| `list_artifacts` | Agent lists available artifacts for a run | `runId` |
-
-**Work package schema change:** Add `mcpServerUrl?: string` to `AdapterWorkspaceSchema` in contract.ts. Populated by daemon when MCP server is active, absent when not (opt-in via manifest or CLI flag).
-
-**Result envelope simplification (ROADMAP):** When agents use `publish_event` via MCP, the `events` array in `SuccessfulAdapterResultSchema` becomes redundant. The roadmap notes this simplification — research recommends keeping `events` for backward compat in v1.1, deprecating in v1.2.
-
-**Version:** `@modelcontextprotocol/sdk` ^1.x. The SDK reached 1.0 stable in late 2024. Use `^1.0.0` as the floor.
-
-**Confidence: MEDIUM** — MCP SDK architecture based on training data + public docs knowledge. Exact version and `StreamableHTTPServerTransport` availability should be verified with `npm show @modelcontextprotocol/sdk version` and reviewing the SDK changelog before implementation.
-
-**Port binding:** Use `node:net` `server.listen(0)` to get an OS-assigned free port. Built into Node.js — no library needed.
+**Confidence: HIGH** — versions pulled from live npm registry search results. Hono architecture verified against official docs.
 
 ---
 
-## Full Dependency Delta
+### 4. Plugin Adapter System
+
+**Decision: No new dependency. Extend the existing `registry.ts` pattern with a `PluginAdapterContract` interface and ESM dynamic `import()` for user-provided adapters.**
+
+The current adapter system in `src/adapters/registry.ts` uses a static `runtimeDefinitions` map and a `switch` in `buildAdapterCommand()`. The manifest's `agent.runtime` field is validated against a `SupportedRuntimeFamilySchema` Zod enum. This locks out third-party adapters.
+
+**Plugin system design:**
+- Define a `PluginAdapterContract` interface in `src/adapters/plugin-contract.ts`:
+  - `family: string` — unique identifier matching `agent.runtime` values.
+  - `displayName: string`
+  - `executableCandidates: readonly string[]`
+  - `executionMode: "non_interactive_cli" | "editor_cli"`
+  - `buildCommand(input: BuildAdapterCommandInput): PreparedAdapterCommand` — adapter-specific command builder.
+- Change `SupportedRuntimeFamilySchema` from a closed Zod `z.enum([...])` to a `z.string().min(1)` on the manifest, with known families validated at runtime against the registry.
+- Built-in adapters (codex, gemini, open-code, claude-code) implement `PluginAdapterContract` — they become first-class plugins internally.
+- Plugin loading: manifest can specify `plugins: [{ path: "./my-adapter.js" }]`. On daemon start, each plugin path is loaded via ESM `await import(path.resolve(repositoryRoot, pluginPath))` and its default export validated against `PluginAdapterContract`.
+- Register loaded plugins into a runtime registry (`Map<string, PluginAdapterContract>`) that replaces the static `runtimeDefinitions` object.
+
+**Why no plugin loader library (`pluginify`, `live-plugin-manager`, etc.):**
+- ESM `import()` is built into Node.js and sufficient for file-path-based plugins in a local-first tool.
+- This is NOT an npm-package plugin ecosystem — it's local adapter scripts for teams or individual users. Dynamic `import()` is the right primitive.
+- A loader library would add complexity and version coupling for a rare code path.
+
+**Why no `@ts-morph` or type-generation tooling:**
+- Plugin authors write TypeScript or JavaScript. The `PluginAdapterContract` interface is the contract — plugins implement it, consumers call it through the interface. No code generation needed.
+
+**ESM dynamic import note:** Node.js 22+ supports `import()` of `.js`, `.mjs`, and ESM `.ts` (with `--experimental-strip-types`). Plugin adapters are expected to be pre-built `.js` files or source TypeScript when the consumer's project compiles them.
+
+**Confidence: HIGH** — pattern derived from analysis of existing `registry.ts`; ESM `import()` is a Node.js 22+ built-in.
+
+---
+
+## Full Dependency Delta for v1.2
 
 ### Production Dependencies to Add
 
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `pino` | `^9.0.0` | Structured JSON daemon logging |
-| `@modelcontextprotocol/sdk` | `^1.0.0` | Embedded MCP server with HTTP transport |
+| Package | Version | Purpose | Why |
+|---------|---------|---------|-----|
+| `hono` | `^4.12.8` | HTTP framework for web dashboard routes | Minimal (zero deps, 7.6 kB gz), Web Standards API, ESM-native |
+| `@hono/node-server` | `^1.19.11` | Node.js adapter for Hono | Required to run Hono on Node.js; separate from core hono package |
 
-### Existing Dependencies (unchanged)
+### Existing Dependencies (already present, leveraged for new features)
 
-| Package | Version | Status |
-|---------|---------|--------|
-| `yaml` | `^2.8.2` | Manifest loading |
-| `zod` | `^4.3.6` | Schema validation (also used for MCP tool input schemas) |
+| Package | Current Version | New v1.2 Usage |
+|---------|-----------------|----------------|
+| `zod` | `^4.3.6` | `z.registry()`, `z.toJSONSchema()` for event schema registry |
+| `@modelcontextprotocol/sdk` | `^1.27.1` | No change — already handles MCP server |
+| `pino` | `^9.14.0` | No change — already handles structured logging |
+| `yaml` | `^2.8.2` | No change — manifest loading |
 
-### Dev Dependencies (unchanged)
+### Dev Dependencies (no additions needed)
 
-| Package | Version | Status |
-|---------|---------|--------|
-| `@types/node` | `^22.15.30` | Node.js type definitions |
-| `typescript` | `^5.9.3` | Compiler |
+| Package | Current Version | Status |
+|---------|-----------------|--------|
+| `@types/node` | `^22.15.30` | No change |
+| `typescript` | `^5.9.3` | No change |
 
 ### NOT Adding
 
 | What | Why Not |
 |------|---------|
-| `node:worker_threads` (separate thread pool library) | Agents are OS processes — JS concurrency buys nothing |
-| `winston` / `bunyan` / `signale` | Heavier than pino with no benefit for this use case |
-| A process manager (`pm2`, `execa`) | `node:child_process.spawn` is sufficient and already used |
-| `express` / `fastify` for MCP HTTP | MCP SDK's `StreamableHTTPServerTransport` includes its own HTTP handling |
-| `dotenv` | Env isolation is handled at spawn time — no .env file loading needed |
-| `p-limit` / `p-queue` | Concurrent slot pool is simple enough to implement inline with `Promise.allSettled` |
-
----
-
-## Node.js 22+ Built-ins Leveraged
-
-| Feature | Node.js API | Used For |
-|---------|------------|---------|
-| Process spawn | `node:child_process.spawn` | Already used — extend for timeout escalation |
-| Timers | `setTimeout` / `clearTimeout` | Timeout SIGTERM + SIGKILL escalation |
-| Port discovery | `node:net` `server.listen(0)` | MCP HTTP server free port |
-| SQLite WAL | `node:sqlite` (experimental) | Already used — safe for concurrent reads |
-| File I/O | `node:fs/promises` | Already used for work packages and results |
+| `express` / `fastify` | Heavier than Hono; Express is not ESM-native; Fastify is overkill for local dashboard |
+| `react` / `preact` / `svelte` | Adds build pipeline (Vite) to a local operator tool — unjustified complexity |
+| `vite` / bundler | No frontend build step is the explicit goal for dashboard |
+| `ajv` / `json-schema` libraries | Zod v4 `z.toJSONSchema()` replaces need for external JSON Schema tools |
+| `zod-to-json-schema` | Deprecated as of Zod v4 stable release (November 2025) |
+| `live-plugin-manager` / `pluginify` | ESM `import()` is sufficient for file-path-based local adapter plugins |
+| `p-queue` / `p-limit` | Not needed — plugin loading is one-time at daemon start |
+| `htmx` (npm) | Use CDN script tag in dashboard HTML; not a production dependency |
 
 ---
 
 ## Integration Points
 
-### Process Timeouts → Manifest Schema
+### SDK/Library Mode → package.json + src/index.ts
 ```
-agent.timeoutMs → ProcessMonitorCallbacks.timeoutMs → child.kill("SIGTERM") → [grace] → child.kill("SIGKILL")
-```
-
-### Structured Logging → Daemon Layers
-```
-src/shared/logger.ts (pino root) → child loggers per component → NDJSON to daemon stdout
-Agent process logs remain unstructured files in logsDir
+package.json "exports": { ".": "./dist/index.js" }
+src/index.ts → re-exports startDaemon, AgentBusDaemon, domain types, schema types
+Consumers: import { startDaemon } from "agent-bus"
 ```
 
-### Concurrent Workers → Worker Command
+### Event Schema Registry → Zod v4 + publishEvent pipeline
 ```
---concurrency N → N parallel slot loops → each calls runWorkerIteration with slot workerId → claim serialized by SQLite
-```
-
-### Env Isolation → Process Runner
-```
-agent.env_mode: "isolated" → spawn with { PATH, HOME } + agent.environment only
-agent.env_mode: "inherit" → current behavior (default, backward compat)
+user registers: agentBus.registerTopicSchema("plan.created", z.object({ ... }))
+publishEvent() → look up registry → z.safeParse(envelope.payload) → reject if ZodError
+agentBus.getTopicSchema(topic) → { schema: ZodSchema, jsonSchema: z.toJSONSchema(schema) }
 ```
 
-### MCP Server → Daemon Startup
+### Web Dashboard → Hono embedded in daemon startup
 ```
-startDaemon() → create McpServer → bind HTTP port → inject AGENT_BUS_MCP_URL into work packages
-tools: publish_event calls daemon.publish(), get_delivery calls deliveryStore, list_artifacts reads filesystem
+startDaemon() → createDashboardServer({ daemon, port }) → Hono app bound to localhost:port
+Routes: GET / → HTML run list | GET /runs/:id → run detail | GET /approvals | GET /failures
+daemon.stop() → dashboardServer.stop() (in parallel with MCP server stop)
+```
+
+### Plugin Adapter System → ESM dynamic import + registry Map
+```
+manifest plugins[]: [{ path: "./adapters/my-agent.js" }]
+startDaemon() → loadPlugins(manifest.plugins, repositoryRoot) → import(path) → validate contract
+adapterRegistry = new Map([...builtins, ...plugins])
+buildAdapterCommand() → adapterRegistry.get(agent.runtime)?.buildCommand(input) ?? generic
 ```
 
 ---
 
-## Sources
+## Node.js 22+ Built-ins Leveraged (New for v1.2)
 
-- Source analysis: `/Users/macbook/Data/Projects/agent-bus/src/adapters/process-runner.ts` (timeout stub at line 44, env spread at lines 94-97)
-- Source analysis: `/Users/macbook/Data/Projects/agent-bus/src/cli/worker-command.ts` (single-worker poll loop)
-- Source analysis: `/Users/macbook/Data/Projects/agent-bus/src/adapters/registry.ts` (env injection via `buildBaseEnvironment`)
-- Source analysis: `/Users/macbook/Data/Projects/agent-bus/src/config/manifest-schema.ts` (AgentSchema — no timeoutMs or env_mode today)
-- Project context: `/Users/macbook/Data/Projects/agent-bus/.gsd/SPEC.md`
-- Roadmap: `/Users/macbook/Data/Projects/agent-bus/.gsd/ROADMAP.md` (MCP design intent)
-- pino npm: https://www.npmjs.com/package/pino (MEDIUM confidence — version unverified)
-- MCP SDK npm: https://www.npmjs.com/package/@modelcontextprotocol/sdk (MEDIUM confidence — transport API unverified against latest)
+| Feature | Node.js API | Used For |
+|---------|------------|---------|
+| ESM dynamic import | `import()` | Plugin adapter loading at daemon start |
+| Module exports resolution | `package.json "exports"` field | SDK/library mode entry point |
 
 ---
 
@@ -254,8 +222,24 @@ tools: publish_event calls daemon.publish(), get_delivery calls deliveryStore, l
 
 Before coding begins, verify:
 
-- [ ] `npm show pino version` → confirm ^9.x is current stable
-- [ ] `npm show @modelcontextprotocol/sdk version` → confirm ^1.x is current stable
-- [ ] Confirm `StreamableHTTPServerTransport` exists in `@modelcontextprotocol/sdk` and its import path (check SDK source or CHANGELOG)
-- [ ] Confirm `pino` ^9 ESM import syntax (`import pino from 'pino'`) works with `"type": "module"`
-- [ ] Confirm `node:sqlite` WAL mode allows concurrent read transactions from the same process (already relies on this — verify write serialization behavior under concurrent claim calls)
+- [ ] `hono` 4.x `@hono/node-server` 1.x confirmed compatible with Node.js 22.12+ (requires Node >= 18; >=22 confirmed fine)
+- [ ] `z.toJSONSchema()` import path in Zod v4: verify `import { z } from "zod"` then `z.toJSONSchema(schema)` — no sub-package import needed
+- [ ] `z.registry()` type signature confirmed from `zod.dev/metadata` docs
+- [ ] Hono app `serve()` from `@hono/node-server` binds with `{ port: 0 }` for OS-assigned ephemeral port (same pattern as MCP server)
+- [ ] ESM `import(filePath)` of a `.js` plugin works from within compiled `dist/` without `--loader` flags on Node.js 22.12+
+- [ ] `package.json "exports"` field supports `"types"` subfield for TypeScript consumers without `moduleResolution: bundler`
+
+---
+
+## Sources
+
+- Zod v4 release notes: https://zod.dev/v4 (HIGH confidence — official docs)
+- Zod metadata and registries: https://zod.dev/metadata (HIGH confidence — official docs)
+- Zod JSON Schema: https://zod.dev/json-schema (HIGH confidence — official docs)
+- Hono npm: https://www.npmjs.com/package/hono — version 4.12.8 confirmed (HIGH confidence)
+- @hono/node-server npm: https://www.npmjs.com/package/@hono/node-server — version 1.19.11 confirmed (HIGH confidence)
+- Hono Node.js docs: https://hono.dev/docs/getting-started/nodejs (HIGH confidence — official docs)
+- Source analysis: `/Users/macbook/Data/Projects/agent-bus/src/adapters/registry.ts` (adapter plugin integration point)
+- Source analysis: `/Users/macbook/Data/Projects/agent-bus/src/daemon/index.ts` (SDK mode integration point)
+- Source analysis: `/Users/macbook/Data/Projects/agent-bus/src/domain/event-envelope.ts` (schema registry integration point)
+- Project context: `/Users/macbook/Data/Projects/agent-bus/.gsd/SPEC.md`
