@@ -243,3 +243,43 @@ artifactConventions: []
       error instanceof ManifestValidationError
   );
 });
+
+test("parseManifestText accepts topic-keyed schemas with default warn enforcement", () => {
+  const manifest = parseManifestText(`
+version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+agents:
+  - id: schema_agent
+    runtime: codex
+    command: [codex, run]
+subscriptions:
+  - agentId: schema_agent
+    topic: plan_done
+schemas:
+  implementation_done:
+    schema:
+      type: object
+      properties:
+        sourceDeliveryId:
+          type: string
+      required:
+        - sourceDeliveryId
+approvalGates: []
+artifactConventions: []
+`);
+
+  assert.deepEqual(Object.keys(manifest.schemas), ["implementation_done"]);
+  assert.equal(manifest.schemas.implementation_done?.enforcement, "warn");
+  assert.deepEqual(manifest.schemas.implementation_done?.schema, {
+    type: "object",
+    properties: {
+      sourceDeliveryId: {
+        type: "string"
+      }
+    },
+    required: ["sourceDeliveryId"]
+  });
+});

@@ -9,6 +9,7 @@ import {
   EventEnvelopeSchema,
   type EventEnvelope
 } from "../domain/event-envelope.js";
+import { EventSchemaValidationError } from "../domain/schema-error.js";
 
 export interface McpServerHandle {
   readonly url: string;
@@ -40,6 +41,13 @@ function createRequestScopedMcpServer(
           content: [{ type: "text" as const, text: "ok" }]
         };
       } catch (error) {
+        if (error instanceof EventSchemaValidationError) {
+          return {
+            isError: true,
+            content: [{ type: "text" as const, text: error.message }]
+          };
+        }
+
         const message = error instanceof Error ? error.message : "Unknown error";
 
         return {
