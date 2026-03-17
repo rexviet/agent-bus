@@ -26,7 +26,7 @@ export interface WorkerCommandIO {
 }
 
 const WORKER_HELP_TEXT = `Worker command:
-  agent-bus worker [--config path] [--worker-id id] [--lease-duration-ms N] [--poll-interval-ms N] [--retry-delay-ms N] [--concurrency N] [--drain-timeout-ms N] [--mcp-port N] [--log-level level] [--once] [--verbose]
+  agent-bus worker [--config path] [--worker-id id] [--lease-duration-ms N] [--poll-interval-ms N] [--retry-delay-ms N] [--concurrency N] [--drain-timeout-ms N] [--mcp-port N] [--dashboard-port N] [--log-level level] [--once] [--verbose]
 `;
 
 interface RunWorkerCommandDependencies {
@@ -207,6 +207,7 @@ export async function runWorkerCommand(
     "--concurrency",
     "--drain-timeout-ms",
     "--mcp-port",
+    "--dashboard-port",
     "--log-level"
   ]);
   const flagsWithoutValues = new Set(["--once", "--verbose"]);
@@ -256,6 +257,7 @@ export async function runWorkerCommand(
   let concurrency: number;
   let drainTimeoutMs: number;
   let mcpPort: number | undefined;
+  let dashboardPort: number | undefined;
   let logLevel: DaemonLogLevel;
 
   try {
@@ -295,6 +297,12 @@ export async function runWorkerCommand(
         "--mcp-port",
         1
       ) ?? undefined;
+    dashboardPort =
+      parseIntegerAtLeast(
+        readOptionValue(args, "--dashboard-port"),
+        "--dashboard-port",
+        1
+      ) ?? undefined;
     const rawLogLevel = readOptionValue(args, "--log-level") ?? "info";
 
     if (!VALID_LOG_LEVELS.has(rawLogLevel as DaemonLogLevel)) {
@@ -319,6 +327,7 @@ export async function runWorkerCommand(
     registerSignalHandlers: false,
     logger,
     ...(mcpPort !== undefined ? { mcpPort } : {}),
+    ...(dashboardPort !== undefined ? { dashboardPort } : {}),
     ...(verboseMonitorFactory ? { verboseMonitorFactory } : {})
   });
   const stopController = createStopController();
@@ -339,6 +348,7 @@ export async function runWorkerCommand(
     drainTimeoutMs,
     ...(retryDelayMs !== undefined ? { retryDelayMs } : {}),
     mcpUrl: daemon.mcpUrl,
+    dashboardUrl: daemon.dashboardUrl,
     once
   });
 

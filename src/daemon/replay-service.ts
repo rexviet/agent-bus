@@ -57,7 +57,7 @@ export function createReplayService({
       });
 
       runStore.touchRun(event.runId);
-      dispatcher.handleReadyDelivery(delivery);
+      dispatcher.handleReadyDelivery(delivery, event.runId);
 
       return delivery;
     },
@@ -78,7 +78,7 @@ export function createReplayService({
 
       runStore.touchRun(event.runId);
       for (const delivery of deliveries) {
-        dispatcher.handleReadyDelivery(delivery);
+        dispatcher.handleReadyDelivery(delivery, event.runId);
       }
 
       return {

@@ -34,6 +34,7 @@ function buildPendingApprovalRecord(
   return {
     approvalId,
     eventId: event.eventId,
+    runId: event.runId,
     topic: event.topic,
     status: "pending",
     requestedAt: event.createdAt
@@ -199,7 +200,7 @@ export function dispatchPublishedEvent(
   }
 
   for (const delivery of result.plannedDeliveries) {
-    dispatcher.handleReadyDelivery(delivery);
+    dispatcher.handleReadyDelivery(delivery, result.event.runId);
   }
 }
 

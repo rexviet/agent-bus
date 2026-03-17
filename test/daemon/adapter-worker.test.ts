@@ -576,12 +576,15 @@ artifactConventions: []
         const entries = capture
           .readEntries()
           .filter((entry) => entry.event !== "mcp.started");
+        const lifecycleEntries = entries.filter(
+          (entry) => entry.event !== "dashboard.started"
+        );
 
         assert.deepEqual(
           entries.map((entry) => entry.event),
-          ["delivery.claimed", "agent.started", "delivery.completed"]
+          ["dashboard.started", "delivery.claimed", "agent.started", "delivery.completed"]
         );
-        assertCorrelationFields(entries, {
+        assertCorrelationFields(lifecycleEntries, {
           deliveryId: execution.delivery.deliveryId,
           agentId: "coder_open_code",
           runId: "run-adapter-log-success-001"
@@ -652,14 +655,22 @@ artifactConventions: []
         const entries = capture
           .readEntries()
           .filter((entry) => entry.event !== "mcp.started");
+        const lifecycleEntries = entries.filter(
+          (entry) => entry.event !== "dashboard.started"
+        );
 
         assert.deepEqual(
           entries.map((entry) => entry.event),
-          ["delivery.claimed", "agent.started", "delivery.retry_scheduled"]
+          [
+            "dashboard.started",
+            "delivery.claimed",
+            "agent.started",
+            "delivery.retry_scheduled"
+          ]
         );
-        assert.equal(entries[2]?.errorMessage, "Temporary adapter failure.");
-        assert.equal(entries[2]?.level, 30);
-        assertCorrelationFields(entries, {
+        assert.equal(entries[3]?.errorMessage, "Temporary adapter failure.");
+        assert.equal(entries[3]?.level, 30);
+        assertCorrelationFields(lifecycleEntries, {
           deliveryId: execution.delivery.deliveryId,
           agentId: "coder_open_code",
           runId: "run-adapter-log-retry-001"
@@ -730,14 +741,17 @@ artifactConventions: []
         const entries = capture
           .readEntries()
           .filter((entry) => entry.event !== "mcp.started");
+        const lifecycleEntries = entries.filter(
+          (entry) => entry.event !== "dashboard.started"
+        );
 
         assert.deepEqual(
           entries.map((entry) => entry.event),
-          ["delivery.claimed", "agent.started", "delivery.dead_lettered"]
+          ["dashboard.started", "delivery.claimed", "agent.started", "delivery.dead_lettered"]
         );
-        assert.equal(entries[2]?.errorMessage, "Permanent adapter failure.");
-        assert.equal(entries[2]?.level, 50);
-        assertCorrelationFields(entries, {
+        assert.equal(entries[3]?.errorMessage, "Permanent adapter failure.");
+        assert.equal(entries[3]?.level, 50);
+        assertCorrelationFields(lifecycleEntries, {
           deliveryId: execution.delivery.deliveryId,
           agentId: "qa_gemini",
           runId: "run-adapter-log-dead-letter-001"
@@ -810,17 +824,20 @@ artifactConventions: []
         const entries = capture
           .readEntries()
           .filter((entry) => entry.event !== "mcp.started");
+        const lifecycleEntries = entries.filter(
+          (entry) => entry.event !== "dashboard.started"
+        );
 
         assert.deepEqual(
           entries.map((entry) => entry.event),
-          ["delivery.claimed", "delivery.dead_lettered"]
+          ["dashboard.started", "delivery.claimed", "delivery.dead_lettered"]
         );
         assert.match(
-          String(entries[1]?.errorMessage),
+          String(entries[2]?.errorMessage),
           /Required artifact docs\/required.md is missing/
         );
-        assert.equal(entries[1]?.level, 50);
-        assertCorrelationFields(entries, {
+        assert.equal(entries[2]?.level, 50);
+        assertCorrelationFields(lifecycleEntries, {
           deliveryId: execution.delivery.deliveryId,
           agentId: "coder_open_code",
           runId: "run-adapter-log-setup-fatal-001"

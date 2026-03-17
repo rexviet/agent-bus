@@ -202,6 +202,8 @@ node --test test/scripts/handoff-execution-to-planning.test.ts
 - Replay for failed deliveries and historical events
 - Runtime adapters for Codex, Open Code, Antigravity, and generic commands
 - Operator CLI for inspect/approve/reject/replay/publish
+- Local dashboard with SSE live updates (binds to `127.0.0.1` only)
+- Dashboard security model (v1): localhost-only, no authentication; do not expose via port-forwarding/reverse proxy on shared environments
 - Planning projection workflow: `.planning/` -> `.gsd/` (`/sync-planning-to-gsd`)
 - Canonical handoff workflow: `.gsd/` -> `.planning/` (`/handoff-execution`)
 
