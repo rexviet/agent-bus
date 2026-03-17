@@ -1,167 +1,156 @@
-<!-- AUTO-GENERATED from .planning/research/PITFALLS.md by scripts/sync-planning-to-gsd.mjs. source-sha256: c85c14fb6e6ed388a0fef9a85e497f900c83975ddd235b814751b4df44fb28a0. Edit the source file, not this projection. -->
+<!-- AUTO-GENERATED from .planning/research/PITFALLS.md by scripts/sync-planning-to-gsd.mjs. source-sha256: 6f9109126ab559cf537647bd843c56b362c018ab7f84ef997df43157319fea3f. Edit the source file, not this projection. -->
 
 # Domain Pitfalls
 
-**Domain:** Node.js event-driven daemon — adding process timeouts, structured logging, concurrent workers, env isolation, embedded MCP server to existing SQLite + lease-based system
-**Researched:** 2026-03-14
-**Confidence:** HIGH for Node.js/SQLite patterns (direct codebase analysis + known platform behavior); MEDIUM for MCP embedding (protocol is young, embedding patterns are sparse in public record)
+**Domain:** Node.js CLI daemon — adding SDK/library mode, event schema registry, web dashboard, and plugin adapter system to existing SQLite + pino + MCP runtime
+**Researched:** 2026-03-17
+**Confidence:** HIGH for SDK/library mode and plugin loading (Node.js platform behavior, direct codebase analysis); MEDIUM for schema registry design (pattern-derived, no public record of this exact use case); MEDIUM for web dashboard co-location (Node.js HTTP patterns, SSE)
 
 ---
 
 ## Critical Pitfalls
 
-Mistakes that cause data corruption, infinite hangs, or require rewrites.
+Mistakes that cause data corruption, broken tests, security holes, or require rewrites.
 
 ---
 
-### Pitfall 1: SIGTERM Does Not Kill the Subprocess Tree
+### Pitfall 1: SDK Mode Registers `process.once("SIGINT/SIGTERM")` — Host Process Owns Shutdown, Not the Library
 
-**What goes wrong:** `child.kill("SIGTERM")` (line 133, `process-runner.ts`) sends SIGTERM to the direct child process only. If the spawned agent launches grandchild processes (e.g., `gemini` spawning a Node.js worker, or a shell wrapper spawning the real binary), those grandchildren are not signaled. The lease expires and recovery-scan reclaims the delivery, but the grandchildren keep running, consuming tokens and potentially writing to the result file after the lease is gone.
+**What goes wrong:** `daemon/index.ts` line 131 registers `process.once("SIGINT", handleSignal)` and `process.once("SIGTERM", handleSignal)` unconditionally when `registerSignalHandlers !== false`. When Agent Bus is embedded as an SDK library inside a test runner, a CI harness, or another Node.js application, the host already owns shutdown. The daemon's signal handlers fire and call `database.close()` before the host's cleanup runs. In Jest/Vitest environments the signal handler causes the process to exit during test teardown, killing the test runner mid-suite.
 
-**Why it happens:** `spawn()` does not create a new process group by default. SIGTERM targets one PID. Wrapper scripts (`#!/bin/sh`) frequently exec into another process, making the shell the direct child and the real agent an orphaned grandchild.
+**Why it happens:** The `startDaemon()` function was designed as a CLI entry point where signal ownership is obvious. The `registerSignalHandlers` option exists but defaults to `true`, so any caller that doesn't know to pass `false` gets the handlers.
 
 **Consequences:**
-- Delivery is reclaimed and retried while the original agent is still running, causing double execution
-- Agent writes to `resultFilePath` after timeout; the file is read by the wrong retry attempt
-- Resource leak: zombie AI API sessions burning quota with no owner
+- Embedded SDK inside tests fires `stop()` on SIGINT, closing the database while tests are mid-transaction
+- Host application's graceful shutdown (Express `server.close()`, Prisma `$disconnect()`) runs after database is already closed
+- `DatabaseSync` calls after `close()` throw synchronously in async contexts, producing silent delivery corruption
+- Duplicated signal listeners accumulate if `startDaemon()` is called multiple times (e.g., in test beforeEach)
 
 **Prevention:**
-- Spawn with `detached: true` and kill the entire process group: `process.kill(-child.pid, "SIGTERM")`. Fall back to `child.kill("SIGTERM")` if `child.pid` is undefined.
-- After SIGTERM, wait a grace period (e.g., 5 seconds) then send SIGKILL to the group.
-- Clear the result file after a timeout kill, before the timeout is reported, so no stale result can be read by a later attempt.
+- Default `registerSignalHandlers` to `false` in SDK mode. Add a separate `createDaemonForProcess()` factory that wraps `startDaemon` with `registerSignalHandlers: true` for CLI use only.
+- Document in the SDK entry point: callers are responsible for calling `daemon.stop()` in their own shutdown handlers.
+- Add a test that starts and stops the daemon twice in the same process to detect handler accumulation.
 
-**Detection:** Lease expiry in recovery-scan coincides with a still-running process in `ps aux`. Agent log file grows after the delivery transitions out of `leased` state.
+**Detection:** Warning sign: Jest exits with "A worker process has failed to exit gracefully" or test timeout on teardown. Also: `process.listenerCount("SIGINT") > 1` after multiple `startDaemon()` calls.
 
-**Phase:** Process Timeouts phase.
+**Phase:** SDK/library mode — first thing to address when exposing `startDaemon` as a public API.
 
 ---
 
-### Pitfall 2: Single SQLite Connection Serializes All Concurrent Workers
+### Pitfall 2: SDK Mode Exposes Internal Mutation Methods Without a Stable Public Contract
 
-**What goes wrong:** Node.js `node:sqlite` `DatabaseSync` is a synchronous, single-connection handle. The existing daemon opens one connection shared by all stores. When concurrent workers are added, multiple async paths call synchronous SQLite operations on the same connection simultaneously within the same event loop turn. Because JS is single-threaded this doesn't corrupt data, but it does mean that a long `claimNextDelivery` transaction (SELECT + UPDATE inside BEGIN/COMMIT) blocks every other SQLite operation for its entire duration.
+**What goes wrong:** The `AgentBusDaemon` interface in `daemon/index.ts` exposes raw store operations — `claimDelivery`, `acknowledgeDelivery`, `failDelivery`, `replayDelivery`, `replayEvent` — which are currently used only by the CLI and internal tests. When these become a public SDK API, any future refactor of `deliveryService` or `deliveryStore` that renames a field (e.g., `leaseToken` → `lease_token`) is a breaking change for SDK consumers. The type definitions leak internal implementation types (`PersistedDeliveryRecord`, store-derived return types via `ReturnType<...>`) rather than stable public shapes.
 
-**Why it happens:** `DatabaseSync` is blocking-synchronous and not connection-pool aware. WAL mode allows one writer and multiple readers, but all go through the same file handle here. The `busy_timeout = 5000` pragma only helps if a second SQLite connection opens the same file — it does nothing within a shared connection.
+**Why it happens:** The `AgentBusDaemon` interface was designed for internal composition, not external consumption. The return type of `publish()` is computed via a conditional `ReturnType<...>` chain — functionally correct but fragile to refactoring.
 
 **Consequences:**
-- Concurrent workers do not actually run their SQLite operations in parallel; they serialize on the JS call stack
-- With N workers each doing `claim → process → ack`, the claim step becomes a thundering-herd SELECT/UPDATE on the same connection
-- Not a correctness bug but a performance cliff when N > 3-4
+- Any store-level schema change (adding a column, renaming a field) breaks every SDK consumer silently at the TypeScript level or at runtime
+- SDK consumers need to import internal types (`PersistedDeliveryRecord`) for type safety, creating tight coupling
+- No deprecation path exists: once internal types are in consumers' code, removing them is a breaking change
 
 **Prevention:**
-- For concurrency up to ~4-8 workers on a local machine, the single shared connection is fine for correctness. Document this explicitly rather than discovering it under load.
-- If true parallel claiming is needed, workers must open separate `DatabaseSync` connections to the same WAL-mode file. Each connection gets its own write lock via SQLite's WAL protocol.
-- Do NOT share a single `DatabaseSync` connection across multiple Node.js `Worker` threads (if ever added) — `DatabaseSync` is not thread-safe.
+- Define a separate `src/sdk/types.ts` with stable public types (`DeliveryRecord`, `RunSummary`, etc.) that are independent of storage layer types
+- Map internal types to public types at the `startDaemon` boundary — never leak `PersistedDeliveryRecord` or `ReturnTypeOf*` to SDK consumers
+- Treat `AgentBusDaemon` as a public API surface: every method's return type must be a named, stable type
+- Add a lint rule or type test that prevents `src/storage/` types from appearing in `src/sdk/` exports
 
-**Detection:** Profiling shows all SQLite calls serialized. Worker throughput plateaus despite N workers.
+**Detection:** Any `import` of `PersistedDeliveryRecord` outside `src/storage/` and `src/daemon/` in SDK-facing files.
 
-**Phase:** Concurrent Workers phase.
+**Phase:** SDK/library mode — architecture decision before writing any SDK entry point.
 
 ---
 
-### Pitfall 3: Lease Duration Shorter Than Process Timeout
+### Pitfall 3: Schema Registry Validation Rejects Valid Events from Agents That Don't Know the Schema Exists
 
-**What goes wrong:** A process timeout of (e.g.) 10 minutes is configured, but the lease duration is 5 minutes. The recovery-scan reclaims the lease and schedules a retry at minute 5. At minute 7, the original process finishes successfully and writes its result file. At minute 8, the retry attempt claims the delivery, spawns a new process, and finds the result file already present from the first run — or worse, the first run's result is read by `loadResultEnvelopeIfPresent` on a delivery that is no longer leased by that worker (stale lease check in `finalizeLeaseBoundTransition` saves us from the ack, but the file is still there to confuse the next worker).
+**What goes wrong:** The schema registry validates `payload` against a registered schema when publishing an event. Existing agents — built before schema validation was added — emit `payload` objects that may include extra fields, use looser types, or omit optional fields. If the schema registry applies strict validation (no extra keys, all fields required), every existing agent breaks on first publish after the registry is enabled. The failure manifests as a dead-lettered delivery with a Zod validation error, not a helpful schema mismatch message.
 
-**Why it happens:** Timeout and lease duration are configured independently with no enforced relationship. Easy to set inconsistent values in the manifest or daemon startup options.
+**Why it happens:** Adding validation to an existing unvalidated pipeline is a breaking change. Zod defaults (`z.object({})` without `.passthrough()`) strip unrecognized keys but do not reject them. However, `.parse()` with `.strict()` rejects them, and even lenient schemas will fail if the agent emits a field with the wrong type.
 
 **Consequences:**
-- Double execution of expensive agent work
-- Confusing log output: "process completed" after "lease reclaimed"
-- Difficult to reproduce because it depends on wall-clock timing
+- All existing agents dead-letter their first delivery after the registry is enabled
+- Developers cannot distinguish "agent wrote bad payload" from "schema is wrong" without reading the error
+- Registry rollout blocks entire workflow until every agent is updated
 
 **Prevention:**
-- Enforce `leaseDurationMs > processTimeoutMs + graceMs` at daemon startup, failing fast with a clear error message.
-- As a rule of thumb: `leaseDurationMs = processTimeoutMs * 1.5 + recoveryIntervalMs`.
-- Document the invariant in manifest schema comments.
+- Introduce schema validation in **warn** mode first: log a structured warning (`level: warn, event: schema.mismatch`) but allow the publish to proceed. Gate strict enforcement behind an explicit per-topic opt-in flag in the manifest (e.g., `schemaEnforcement: "warn" | "reject"`).
+- Use `.passthrough()` on all registry schemas by default (extra keys allowed); only reject missing required fields and wrong types.
+- Write a migration script that scans existing event records in SQLite and validates them against candidate schemas before enabling enforcement.
 
-**Detection:** Warning sign is any delivery that transitions `leased → retry_scheduled` and then shortly after has a result file present from the first attempt.
+**Detection:** Run `npm test` with schema enforcement enabled and observe dead-letter rate. If > 0 with existing fixtures, the registry is too strict.
 
-**Phase:** Process Timeouts phase (must validate lease/timeout relationship when timeout is introduced).
+**Phase:** Event schema registry — enforcement strategy must be decided before first schema is registered.
 
 ---
 
-### Pitfall 4: Environment Pollution from `...process.env` in Child Spawning
+### Pitfall 4: Plugin Adapter Loading via Dynamic `import()` Shares the ESM Module Cache
 
-**What goes wrong:** `process-runner.ts` line 94 spreads the full daemon's `process.env` into every child process: `env: { ...process.env, ...input.execution.environment }`. This is the current behavior. When env isolation is added, if the merge order is wrong or the allowlist is incomplete, agent processes receive secrets meant only for the daemon (e.g., `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, `AWS_*` credentials held by the daemon itself for MCP or config purposes).
+**What goes wrong:** The plugin system loads adapters via dynamic `import(pluginPath)`. Node.js ESM module cache is keyed by resolved URL and is permanent for the lifetime of the process — there is no public API to invalidate or evict a module. This means:
+1. A plugin loaded once cannot be reloaded (e.g., after hot-swap during development)
+2. Two plugins at different paths that resolve to the same canonical URL are the same module instance
+3. If a plugin import fails mid-way (e.g., top-level await throws), the cache entry is left in an error state and subsequent imports of the same path also fail without a useful error
 
-**Why it happens:** The spread-and-override pattern is idiomatic Node.js but is "deny by exception" rather than "allow by allowlist". Any variable not explicitly overridden leaks through.
+**Why it happens:** ESM caching is a platform invariant, not a configuration choice. Dynamic `import()` does not bypass the cache.
 
 **Consequences:**
-- Security: agent processes (which may write files or call external APIs) receive credentials they shouldn't
-- Debugging confusion: agent behavior changes based on the operator's shell environment, not just the manifest
-- Hermetic reproducibility is impossible: same manifest, different operator shell = different agent env
+- Plugin reload without process restart is not possible in pure ESM — a common expectation for plugin systems
+- A buggy plugin that throws during module initialization poisons the cache for the entire daemon lifetime
+- Tests that load different plugin configurations in the same Jest/Vitest process see stale cached modules
 
 **Prevention:**
-- Env isolation must construct a fresh env from explicit sources only: OS minimal set (PATH, HOME, TMPDIR, USER, LANG), manifest-defined `environment` block, and Agent Bus contract vars (`AGENT_BUS_*`).
-- Use an allowlist schema in the manifest (e.g., `envPassthrough: [PATH, HOME]`) rather than a denylist.
-- Add a test that spawns a child with a poisoned parent env variable and asserts the child does not receive it.
+- Document explicitly: plugins are loaded once per process lifetime; daemon restart is required to reload a plugin.
+- Validate plugin path resolution before `import()` — check that the file exists with `fs.access()` and emit a structured error before the import attempt fails with a confusing module-not-found error.
+- Wrap `import()` in a try/catch that captures the full error and includes the plugin path in the message: `Failed to load plugin at ${pluginPath}: ${error.message}`.
+- For tests, instantiate plugin adapters directly (pass the builder function) rather than loading via dynamic import to avoid cache state leaking between tests.
 
-**Detection:** Log the full env received by child processes in a test. Look for variables not in the manifest's `environment` block.
+**Detection:** Load the same plugin twice in a test with a modified export; assert the second load returns the updated version. It won't — confirms cache is permanent.
 
-**Phase:** Env Isolation phase.
+**Phase:** Plugin adapter system — document the constraint before implementation to prevent a design that promises hot-reload.
 
 ---
 
-### Pitfall 5: Structured Logging Breaks Existing Test Assertions on Raw Text Output
+### Pitfall 5: Web Dashboard HTTP Server Port Conflicts with MCP HTTP Server
 
-**What goes wrong:** Current tests (66 passing) likely assert on console output, error messages, or log files as raw text strings. Introducing a structured logger that emits JSON lines (or a structured format) will change the output format. Tests that match on exact strings ("error: delivery not found") will fail against JSON `{"level":"error","message":"delivery not found","deliveryId":"..."}`.
+**What goes wrong:** The daemon already runs an MCP HTTP server on a dynamic port (bound to `127.0.0.1`). Adding a web dashboard HTTP server introduces a second `http.createServer()` in `startDaemon()`. If both servers are started sequentially without error handling between them, an `EADDRINUSE` on the dashboard port causes the MCP server to already be running — `stop()` must be called on it before re-throwing, or the port is leaked. If the existing MCP server's port happens to match the configured dashboard port (unlikely but possible when a fixed port is configured), the bind fails silently or with a confusing error.
 
-**Why it happens:** Structured logging is a format change, not just a behavior change. It touches every code path that currently calls `console.log` / `console.error` or writes to log files.
+**Why it happens:** Two independent `http.createServer()` calls in the same startup sequence create a partial-startup failure mode that is easy to overlook. The existing MCP startup already has a cleanup guard (`database.close()` on failure) but it does not follow through to MCP stop.
 
 **Consequences:**
-- Large test breakage across the suite on day one of the logging PR
-- Temptation to compromise: keep raw logs for tests, structured for production — leading to two code paths
+- Daemon startup fails with `EADDRINUSE` but MCP server is already listening — daemon appears to have started (port is occupied) but is non-functional
+- If startup is retried (e.g., by PM2), the port stays occupied because the first MCP server was never stopped
+- Dashboard on a fixed port conflicts with MCP on `--mcp-port [same]` — both fail, neither with a clear error
 
 **Prevention:**
-- Audit all test files for string-matching on log output before starting the logging implementation.
-- Design the logger with a pluggable transport: in tests, inject a transport that captures structured records as objects (not strings), so tests assert on `record.message` rather than raw strings.
-- Add a `LOG_FORMAT=json|text` env var so human-readable format can still be used in local development.
+- Start both servers in parallel (`Promise.all`), then clean up both on any failure.
+- Add explicit port conflict detection: if dashboard port = MCP port, fail fast at validation before any server starts.
+- Follow the existing pattern in `daemon/index.ts`: wrap all server startups in try/catch, call `stop()` on already-started servers before re-throwing.
+- Use port 0 (ephemeral) as the default for both servers; only fixed ports require explicit configuration and conflict checking.
 
-**Detection:** Run `npm test` immediately after adding the logger and before touching any call sites. The failure count tells you the scope.
+**Detection:** In startup code, add a test that simulates `EADDRINUSE` on the dashboard server after MCP has started; assert MCP is also stopped.
 
-**Phase:** Structured Logging phase — audit must precede implementation.
+**Phase:** Web dashboard — port management and startup cleanup reviewed before first HTTP server implementation.
 
 ---
 
-### Pitfall 6: MCP Server Sharing the Daemon's DatabaseSync Connection Across Async HTTP Boundaries
+### Pitfall 6: Web Dashboard Creates a Second `DatabaseSync` Read Connection — WAL Mode Required
 
-**What goes wrong:** The embedded MCP server handles incoming tool calls (e.g., `publish_event`) asynchronously over stdio or HTTP. These handlers call into daemon methods that perform synchronous SQLite operations. If the MCP server processes multiple requests concurrently (e.g., two agents both call `publish_event` at the same time), both handlers enter the event loop concurrently and invoke synchronous SQLite writes on the shared `DatabaseSync` connection interleaved. SQLite's synchronous interface means the JS call stack serializes them, so correctness is maintained — but if any handler throws inside a `BEGIN` block and the `ROLLBACK` is not reached (e.g., due to an unhandled promise rejection), the database is left in a hung transaction.
+**What goes wrong:** The web dashboard serves read-only queries (list runs, get delivery state, list approvals) concurrently with the daemon's write operations. If the dashboard uses the same shared `DatabaseSync` connection as the daemon, every dashboard read serializes with every daemon write on the JS event loop — acceptable for low traffic but creates event loop head-of-line blocking on slow dashboard queries (e.g., a full run history scan). If the dashboard opens a second connection to the same SQLite file without WAL mode, write operations block all reads until the write transaction commits.
 
-**Why it happens:** The current codebase opens `BEGIN` / `COMMIT` / `ROLLBACK` manually. An unhandled rejection that bypasses the `ROLLBACK` in `publish-event.ts` or `adapter-worker.ts` leaves the connection in an open transaction, causing all subsequent queries to fail with "cannot start a transaction within a transaction."
-
-**Consequences:**
-- Daemon becomes unusable for all subsequent operations after a single MCP handler crashes mid-transaction
-- Difficult to diagnose: error appears as "SQLITE_ERROR: cannot start a transaction" on unrelated operations
-
-**Prevention:**
-- Wrap all transaction boundaries in a helper that guarantees `ROLLBACK` on any throw (the existing `publish-event.ts` already does this, but validate every MCP-facing code path does too).
-- The MCP server's async request handlers must be wrapped in a top-level try/catch that logs and returns an MCP error response without crashing the process.
-- Consider using a lightweight transaction helper: `withTransaction(db, fn)` that always rolls back on error.
-
-**Detection:** Inject a deliberate throw inside a transaction in an integration test and assert the database remains queryable afterward.
-
-**Phase:** MCP Server phase.
-
----
-
-### Pitfall 7: MCP Server Stdio Transport Conflicts with Daemon's own stdout/stderr Usage
-
-**What goes wrong:** The MCP specification's stdio transport uses stdin/stdout as the communication channel between MCP client and server. If the daemon is run in daemon mode (i.e., as a background process), and the embedded MCP server uses stdio transport, any `console.log` or `process.stdout.write` call from the daemon (including from structured logging) will corrupt the MCP message framing. MCP over stdio uses newline-delimited JSON; any non-JSON line from the daemon will cause the MCP client to fail to parse the stream.
-
-**Why it happens:** stdio is a single stream shared by the process. MCP stdio assumes exclusive ownership of stdout. Daemon logging to stdout breaks this assumption.
+**Why it happens:** `node:sqlite` `DatabaseSync` is synchronous and single-connection. The existing daemon uses WAL mode (`PRAGMA journal_mode = WAL`), which does allow concurrent readers with a single writer — but only if readers open their own connection.
 
 **Consequences:**
-- MCP client disconnects or throws parse errors on every log line emitted
-- Daemon becomes non-functional as an MCP server when structured logging writes to stdout
+- Dashboard reads block daemon write throughput on the shared connection
+- Without WAL, a second reader connection gets `SQLITE_LOCKED` during any daemon transaction
+- Developer sees "dashboard hangs during high delivery load" — hard to diagnose without understanding WAL
 
 **Prevention:**
-- If using stdio transport: redirect ALL daemon logging to stderr or to file. Never allow stdout writes except through the MCP transport layer.
-- Prefer HTTP/SSE transport (listening on a local port) for the embedded MCP server if the daemon also needs stdout for other purposes (e.g., CLI mode).
-- Decide the transport strategy early — it affects the entire logging architecture.
+- The dashboard must open a read-only connection: `new DatabaseSync(dbPath, { open: true })` with `PRAGMA query_only = ON` set immediately.
+- Confirm WAL mode is already set before opening the read connection (the daemon's `openSqliteDatabase` already sets WAL — verify with `PRAGMA journal_mode`).
+- Never share the daemon's write connection with the dashboard's request handlers.
+- Add a comment at the dashboard connection point explaining the WAL dependency.
 
-**Detection:** Start the MCP server with a test client and emit a single log line to stdout. The client will receive a parse error.
+**Detection:** Run a dashboard query while the daemon is inside a long transaction; time the query. Should not block if WAL is active and connections are separate.
 
-**Phase:** MCP Server phase — transport choice must be decided before structured logging is implemented.
+**Phase:** Web dashboard — connection strategy reviewed before any dashboard SQL is written.
 
 ---
 
@@ -169,68 +158,110 @@ Mistakes that cause data corruption, infinite hangs, or require rewrites.
 
 ---
 
-### Pitfall 8: Recovery Scan Firing While Multiple Workers Are Mid-Claim
+### Pitfall 7: SDK Mode — `stop()` Does Not Wait for In-Flight Worker Iterations
 
-**What goes wrong:** With concurrent workers, multiple workers call `claimNextDelivery` in the same event loop tick. The claim query uses `SELECT ... LIMIT 1` followed by an UPDATE — all inside a BEGIN/COMMIT. Because `DatabaseSync` is synchronous and the event loop is single-threaded, these calls actually serialize correctly. However, if recovery-scan fires (via `setInterval`) at the same time as several workers are mid-claim, the recovery-scan's `reclaimExpiredLeases` could incorrectly reclaim a lease that was just granted but not yet reflected in its SELECT (if the SELECT and UPDATE race across a timer callback boundary).
+**What goes wrong:** The current `stop()` in `daemon/index.ts` (line 249) calls `recoveryScan.stop()`, `mcpServer.stop()`, and `database.close()` synchronously in sequence. It does not wait for any in-flight `runWorkerIteration` promises. In SDK mode, the caller may call `daemon.stop()` while a worker is mid-delivery (spawned process running). The database is closed while the worker is about to write the delivery result, causing a `DatabaseSync` throw that is swallowed in the async iteration context. The delivery is left in `leased` state with no owner — recovery scan will fix it on next start, but it appears as a spurious retry.
 
-**Why it happens:** `setInterval` callbacks and async continuations share the event loop. A delivery claimed by a worker but not yet committed when the recovery-scan SELECT runs can appear expired (old `lease_expires_at` still present in the row until the UPDATE commits).
+**Why it happens:** Graceful drain was identified as a pitfall in the v1.1 PITFALLS.md (Pitfall 14) but deferred. In CLI mode, SIGTERM to the daemon kills the whole process anyway. In SDK mode, `stop()` is called programmatically and the caller may await it and then proceed with other cleanup — they expect a clean stop.
 
 **Prevention:**
-- The existing claim logic already handles this: the UPDATE's WHERE clause requires `status IN ('ready', 'retry_scheduled') AND available_at <= ? AND (lease_expires_at IS NULL OR lease_expires_at <= ?)`. A just-claimed row has status `leased`, so the recovery scan's SELECT won't touch it.
-- This is safe by design, but document it explicitly so concurrent workers implementation doesn't break the invariant by changing the claim logic.
+- `stop()` must await `adapterWorker.drainInFlight()` before `database.close()`. Track active `runIteration` promises in a `Set<Promise>` and `await Promise.allSettled(...)` before closing.
+- Add a `drainTimeoutMs` option: if workers don't finish within N seconds, `forceKillInFlight()` and then close.
+- This is the same fix needed for the existing CLI daemon — SDK mode makes it urgent because the caller awaits `stop()`.
 
-**Detection:** Add concurrent worker tests that run workers and recovery-scan simultaneously; assert no delivery is double-claimed.
+**Detection:** Start an iteration, call `stop()` immediately, assert the delivery is in `completed` or `retry_scheduled` state (not `leased`) after stop resolves.
 
-**Phase:** Concurrent Workers phase.
+**Phase:** SDK/library mode — must ship with `stop()` drain before the SDK is usable in tests.
 
 ---
 
-### Pitfall 9: Structured Logger Becomes a Synchronous Bottleneck
+### Pitfall 8: Schema Registry — Zod Schema Defined in Manifest YAML Cannot Express Nested Object Types
 
-**What goes wrong:** Structured loggers that write to files synchronously (using `fs.writeFileSync` or equivalent) block the event loop on each log call. In a high-throughput scenario (many workers logging process start/complete events), this serializes the entire daemon on disk I/O.
+**What goes wrong:** The manifest YAML schema (`manifest-schema.ts`) is loaded with Zod. If the schema registry stores per-topic payload schemas as YAML snippets or JSON Schema strings inside the manifest, parsing arbitrary user-defined JSON Schema at runtime requires a JSON Schema → Zod conversion layer (e.g., `zod-from-json-schema`) or a separate JSON Schema validator (e.g., Ajv). Using pure Zod for user-defined schemas requires distributing Zod schema definitions as TypeScript, which breaks the "declarative YAML manifest" model.
 
-**Why it happens:** Synchronous file writes are the simplest logging implementation. `DatabaseSync` already blocks on SQLite operations; adding blocking log writes compounds the latency.
-
-**Prevention:**
-- Use async or buffered log writes. Node.js streams (`fs.createWriteStream`) with a writable buffer are the right primitive — already used for per-run log files in `process-runner.ts`.
-- Daemon-level structured logging should write to `process.stderr` (async) or a dedicated async write stream, not `fs.writeFileSync`.
-- Separate per-run log files (already file-per-process) from daemon-level structured logs (single stream for all daemon events).
-
-**Phase:** Structured Logging phase.
-
----
-
-### Pitfall 10: Env Isolation Breaking Adapter Executables That Rely on PATH
-
-**What goes wrong:** When env isolation strips `process.env` and rebuilds from a clean base, `PATH` may not contain the directories needed to locate `gemini`, `codex`, or `opencode`. The spawn call resolves the command via `PATH`, so a stripped `PATH` causes `ENOENT` on the child process, which is silently handled as a process error and retried until dead-letter.
-
-**Why it happens:** `PATH` is a system-level variable, not an application variable, but it's part of `process.env`. An allowlist that doesn't explicitly carry `PATH` through will break executable resolution.
+**Why it happens:** Zod schemas are TypeScript code, not data. The manifest is data (YAML). These two representations are not directly interchangeable. Projects often resolve this by storing JSON Schema in the manifest (data-compatible) and converting it to Zod at load time — but the conversion libraries are imperfect (union types, refinements, and custom validators don't convert cleanly).
 
 **Consequences:**
-- All agent spawns fail with `ENOENT` after env isolation is enabled
-- Manifests as dead-lettered deliveries with error "spawn gemini ENOENT"
-- Easy to miss in local testing if the developer's PATH is always correct
+- If JSON Schema is chosen: conversion gaps mean some valid JSON Schemas silently pass validation they should fail
+- If Zod-as-code is chosen: schemas must be TypeScript files, not YAML — manifest loses its "single-file declarative" character
+- Mixed approach (YAML for simple schemas, TypeScript for complex) creates two validation paths to maintain
 
 **Prevention:**
-- `PATH` must be in the minimum required passthrough set, not optional.
-- After implementing env isolation, run a basic spawn test that verifies the adapter executable resolves correctly.
-- Consider resolving executable paths to absolute paths at daemon startup (using `which`/`which-sync`) and passing absolute paths to `spawn`, eliminating PATH dependency at runtime.
+- Choose JSON Schema (Ajv) for user-defined payload schemas — it is data-native, YAML-embeddable, and Ajv is the standard. Do not convert JSON Schema to Zod at runtime.
+- Keep Zod exclusively for internal envelope and manifest validation — do not expose Zod schemas to plugin/user-defined schemas.
+- Start with a minimal schema format: only `required`, `properties`, and `type` keywords. Document that complex validation (unions, custom refinements) requires a plugin validator.
 
-**Phase:** Env Isolation phase.
+**Detection:** Write a JSON Schema with a `$ref` or `oneOf` and attempt to validate an event payload; assert the validation result matches expected behavior before committing to the Ajv integration.
+
+**Phase:** Event schema registry — schema format decision (JSON Schema vs Zod vs custom) before implementation.
 
 ---
 
-### Pitfall 11: Concurrent Workers Claiming the Same Delivery (False Concurrency Safety)
+### Pitfall 9: Plugin Adapters That Call `process.exit()` or Register Global Signal Handlers
 
-**What goes wrong:** With concurrent workers implemented as multiple calls to `claimNextDelivery` in the same Node.js process, correctness relies on the SELECT + UPDATE being atomic within the transaction. This is safe for synchronous `DatabaseSync` in a single process. However, if a future implementation uses separate Node.js `Worker` threads or separate processes each with their own `DatabaseSync` connection to the same SQLite file, the SELECT-then-UPDATE claim pattern is a TOCTOU race: two workers SELECT the same row (both see it as claimable), both attempt to UPDATE it, and SQLite's row-level locking allows only one to succeed — but only if the UPDATE includes a sufficiently specific WHERE clause.
+**What goes wrong:** Third-party or user-written adapter plugins that call `process.exit()` on fatal errors, or that register their own `process.on("SIGTERM")` handlers, directly conflict with the daemon's lifecycle. An adapter plugin that calls `process.exit(1)` kills the entire daemon, including any other in-flight deliveries, the MCP server, and the database connection — without triggering `stop()` cleanup. Result: database left open mid-transaction, leased deliveries stuck permanently.
 
-**Why it happens:** The current `claimDelivery` UPDATE includes `AND status IN ('ready', 'retry_scheduled')` which means only one UPDATE will find the row in the right state after the first succeeds and changes it to `leased`. This is correct. But any change that relaxes this WHERE clause or adds an intermediate step breaks the pattern.
+**Why it happens:** Plugin authors used to writing CLI tools or standalone scripts use `process.exit()` idiomatically for error handling. The plugin contract does not currently prohibit it because the adapter system uses process spawning (not in-process module loading) — but the plugin system loads adapter builders in-process.
+
+**Consequences:**
+- Any plugin that calls `process.exit()` during initialization (before any delivery is processed) crashes the daemon with no log output
+- Plugins that call `process.exit()` on their first delivery dead-letter every delivery they handle
+- Global signal handler accumulation: each `startDaemon()` + plugin load pair adds another handler to `process` event emitter
 
 **Prevention:**
-- Document that the atomic claim relies on the UPDATE's status constraint. Never add a separate status-check step before the UPDATE.
-- If true multi-process or multi-thread concurrency is ever added, test concurrent claims explicitly with SQLite's WAL mode.
+- Define the plugin contract explicitly: plugins MUST NOT call `process.exit()`, register global signal/uncaughtException handlers, or call `process.on(...)`. Document this in the plugin API surface.
+- Add a test that loads a plugin stub that calls `process.exit()` and asserts the daemon catches and rejects it (using `process.mockExit` in tests).
+- Consider loading plugins inside a sandboxed `vm.runInNewContext()` for initialization validation, if only to detect global mutations during startup.
 
-**Phase:** Concurrent Workers phase — understand before implementing.
+**Detection:** After loading a plugin, assert `process.listenerCount("SIGTERM")` has not increased beyond the expected count.
+
+**Phase:** Plugin adapter system — contract enforcement before any plugin is accepted.
+
+---
+
+### Pitfall 10: Web Dashboard SSE Stream Left Open During Daemon `stop()`
+
+**What goes wrong:** The web dashboard uses Server-Sent Events (SSE) to push delivery state updates to the browser. SSE connections are long-lived — the client holds an HTTP response open for minutes. When `daemon.stop()` is called, the `httpServer.close()` call stops accepting new connections but does not destroy existing keep-alive or SSE connections. Node.js `http.Server.close()` only resolves the callback after all connections are closed — if SSE clients are connected, `close()` hangs indefinitely.
+
+**Why it happens:** `http.Server.close()` is documented to not forcefully terminate existing connections. SSE connections are persistent HTTP responses that keep the socket open until the client disconnects. This is the same pattern that causes Express servers to hang on graceful shutdown.
+
+**Consequences:**
+- `daemon.stop()` never resolves as long as a browser tab has the dashboard open
+- In SDK/test mode, test teardown hangs waiting for stop to complete
+- CI runs timeout waiting for daemon stop if a test opened a dashboard connection
+
+**Prevention:**
+- Use `server.closeAllConnections()` (Node.js 18.2+) before `server.close()` to forcefully terminate SSE connections during shutdown.
+- Alternatively, track active SSE response objects and call `res.end()` on all of them before calling `server.close()`.
+- Add a shutdown timeout: if `server.close()` does not resolve within 3 seconds, call `server.closeAllConnections()` as a fallback.
+- Test: start daemon with dashboard, open an SSE connection, call `stop()`, assert it resolves within 5 seconds.
+
+**Detection:** `daemon.stop()` hangs in test teardown after opening any dashboard SSE endpoint.
+
+**Phase:** Web dashboard — shutdown integration must be tested before dashboard is used in any test suite.
+
+---
+
+### Pitfall 11: Plugin Adapter Registry Hardcodes `SupportedRuntimeFamily` Enum — Plugin System Breaks the Closed Enum
+
+**What goes wrong:** `adapters/registry.ts` exports `SupportedRuntimeFamilySchema = z.enum(["codex", "open-code", "gemini", "claude-code"])`. The adapter worker calls `getRuntimeDefinition(input.agent.runtime)` to look up the builder. With a plugin system, user-defined runtimes (e.g., `"my-custom-agent"`) will not be in this enum. The manifest schema validates `runtime: z.string().min(1)` (not the enum), so a plugin runtime passes manifest loading — but `getRuntimeDefinition()` returns `null` and `buildAdapterCommand()` falls through to `buildGenericManifestCommand()`. This silently bypasses all vendor-specific command construction for user plugins that need custom logic.
+
+**Why it happens:** The enum was added to enumerate known vendors. The fallback to `buildGenericManifestCommand` was added for forward compatibility but predates the plugin system. A plugin that needs to inject custom args (like `--headless`, identity files, or model selectors) cannot do so via the generic path.
+
+**Consequences:**
+- Plugins that need custom command building silently fall back to the generic path — no error, just wrong behavior
+- Plugin authors cannot tell whether their plugin's `buildCommand()` function was called
+- The closed `SupportedRuntimeFamilySchema` enum is exported as part of the adapter API — adding plugin runtimes to it is impossible without modifying the source
+
+**Prevention:**
+- Replace the closed enum with an open registry: `Map<string, RuntimeDefinition & { buildCommand: BuildAdapterCommandFn }>`.
+- Plugin registration: `registerAdapter(family: string, definition: RuntimeDefinition)`.
+- Remove `SupportedRuntimeFamilySchema` from the public API surface — it is now an internal detail of built-in adapters.
+- Add a test that registers a plugin adapter and asserts its `buildCommand` is called (not the generic fallback).
+
+**Detection:** Register a plugin adapter that adds a custom arg; inspect the spawned command and assert the arg is present. If not present, the generic path was used.
+
+**Phase:** Plugin adapter system — registry refactor before plugin loading is implemented.
 
 ---
 
@@ -238,39 +269,54 @@ Mistakes that cause data corruption, infinite hangs, or require rewrites.
 
 ---
 
-### Pitfall 12: Log File Accumulation Without Retention Policy
+### Pitfall 12: Schema Registry Adds Per-Event Validation Cost to the Publish Hot Path
 
-**What goes wrong:** Each delivery attempt creates a new log file at `logs/adapter-runs/{deliveryId}-attempt-{N}.log`. With multiple workers processing many deliveries, log files accumulate indefinitely. On a developer's local machine running long-lived workflows, the logs directory can grow to gigabytes.
+**What goes wrong:** `publish-event.ts` persists events inside a `BEGIN/COMMIT` transaction. Adding schema validation inside this transaction means Zod/Ajv runs synchronously while the transaction is open. For events with large payloads (e.g., a 50KB JSON payload from a code agent), Ajv schema compilation and validation adds measurable latency inside the write lock.
 
 **Prevention:**
-- Add a log retention policy (e.g., keep last N runs, or delete files older than X days) as part of the structured logging phase.
-- At minimum, document that log cleanup is manual.
+- Validate the event payload before entering the transaction. Schema validation should be a pre-transaction step.
+- Compile Ajv schemas once at daemon startup (per topic, per schema version) and cache the compiled validator. Never compile a schema per event.
+- Add a benchmark test: publish 100 events with schema validation enabled and assert mean latency per publish is within an acceptable bound.
 
-**Phase:** Structured Logging phase (natural time to address).
+**Phase:** Event schema registry — validation placement must be pre-transaction.
 
 ---
 
-### Pitfall 13: MCP Tool Schema Drift from Daemon API
+### Pitfall 13: SDK Module Dual-Instance from `require` vs `import` in Test Environments
 
-**What goes wrong:** MCP tool definitions (`publish_event`, `get_delivery`, `list_artifacts`) must match the daemon's actual API contracts. If the daemon's event envelope schema or delivery structure changes (e.g., in a future v1.x), the MCP tool schemas drift silently — agents calling `publish_event` get no type error, just a runtime failure when the daemon rejects the payload.
+**What goes wrong:** If Agent Bus is published as an npm package with both CJS and ESM entry points (via `exports` field), a test runner that mixes `require()` and `import()` may load two instances of the same module. Two instances means two `DatabaseSync` connections to the same SQLite file, two sets of state, and confusing test failures where published events are not visible to the query-side instance.
 
 **Prevention:**
-- Derive MCP tool input schemas from the same Zod schemas used for manifest and envelope validation (they already exist in `src/domain/` and `src/config/manifest-schema.ts`).
-- Add a test that validates MCP tool call payloads against the live Zod schemas.
+- Publish ESM-only (`"type": "module"` in `package.json`). Do not add a CJS entry point unless there is an explicit consumer requirement.
+- If CJS is required, use a single CJS wrapper that re-exports the ESM default and document the dual-instance risk.
+- Add a test that imports the package from two different paths (`../../src/daemon/index.js` and `../../src/index.js`) and asserts they return the same reference.
 
-**Phase:** MCP Server phase.
+**Phase:** SDK/library mode — module export strategy decided before publishing.
 
 ---
 
-### Pitfall 14: `stopped` Flag in daemon `stop()` Does Not Drain In-Flight Workers
+### Pitfall 14: Web Dashboard Reads SQLite While Recovery Scan Runs — Stale Read Risk
 
-**What goes wrong:** The current `stop()` in `daemon/index.ts` sets `stopped = true`, stops the recovery scan, and closes the database. If workers are mid-iteration (running a child process), the database is closed while they may still be trying to write results. `DatabaseSync` operations after `close()` throw synchronously, which may be swallowed in an async context and leave deliveries stuck in `leased` with no further handling.
+**What goes wrong:** The dashboard's read connection may see a stale view of delivery state during the brief window when the recovery scan is running its `reclaimExpiredLeases` UPDATE. SQLite WAL mode guarantees snapshot isolation per connection — the dashboard's read transaction sees a consistent snapshot of the moment the read began, not mid-update state. This is correct behavior, but developers may misinterpret "dashboard shows delivery as leased even though it was just retried" as a bug.
 
 **Prevention:**
-- When adding concurrent workers, implement a graceful drain: stop accepting new claims, wait for all in-flight `runIteration` promises to settle, then close the database.
-- Track active worker promises in a `Set<Promise>` and `await Promise.allSettled(activeWorkers)` before `database.close()`.
+- Document that dashboard state reflects SQLite WAL snapshot isolation: reads are consistent but may lag writes by one event-loop cycle.
+- Add a "last updated" timestamp to dashboard responses so the operator knows the data freshness.
+- Do not attempt to work around WAL snapshot isolation by sharing the write connection — this is the correct behavior.
 
-**Phase:** Concurrent Workers phase — stop must be made drain-aware simultaneously with adding concurrency.
+**Phase:** Web dashboard — document the behavior, not a bug to fix.
+
+---
+
+### Pitfall 15: Plugin Manifests Can Declare Arbitrary `runtime` Values That Pass Zod But Crash the Worker
+
+**What goes wrong:** The manifest schema allows `runtime: z.string().min(1)` — any non-empty string is valid. A plugin manifest that declares `runtime: "my-plugin"` passes manifest loading. If the plugin adapter for `"my-plugin"` is not registered (e.g., the plugin file is missing or failed to load), `buildAdapterCommand()` falls through to `buildGenericManifestCommand()`, which uses `agent.command` as-is. If `command` is also wrong (e.g., `["my-plugin-cli", "--task"]` and `my-plugin-cli` is not installed), the spawn fails with `ENOENT`, which dead-letters the delivery with a cryptic error.
+
+**Prevention:**
+- At daemon startup (after plugins are loaded), validate that every `runtime` value in the manifest has a registered adapter. Fail fast with a clear error: `No adapter registered for runtime "my-plugin". Did you forget to load the plugin?`
+- This check already partially exists: `assertSupportedRuntimeFamily` throws for unknown runtimes, but only if the runtime is not in the closed enum. With the open registry (Pitfall 11 fix), this check becomes natural.
+
+**Phase:** Plugin adapter system — startup validation added alongside registry.
 
 ---
 
@@ -278,25 +324,30 @@ Mistakes that cause data corruption, infinite hangs, or require rewrites.
 
 | Phase Topic | Likely Pitfall | Mitigation |
 |-------------|---------------|------------|
-| Process Timeouts | SIGTERM not killing subprocess tree (grandchildren survive) | Kill process group with `-child.pid`; add SIGKILL fallback |
-| Process Timeouts | Lease shorter than timeout causes double execution | Validate `leaseDurationMs > timeoutMs + graceMs` at startup |
-| Structured Logging | Test suite breakage from format change | Audit string assertions before implementation; inject transport in tests |
-| Structured Logging | Stdout corruption of MCP stdio transport | Decide transport (stdio vs HTTP) before logging architecture |
-| Structured Logging | Synchronous writes blocking event loop | Use async streams, not `writeFileSync` |
-| Concurrent Workers | `stop()` closes DB while workers are mid-flight | Drain in-flight promises before `database.close()` |
-| Concurrent Workers | Recovery-scan / worker lease interaction | Existing WHERE clause is safe; do not relax it |
-| Env Isolation | PATH stripped, executables not found | PATH is mandatory passthrough; resolve to absolute paths at startup |
-| Env Isolation | Daemon secrets leaking to children | Allowlist (not denylist) approach; test with poisoned env |
-| MCP Server | Hung transaction after unhandled rejection in handler | `withTransaction` helper guaranteeing ROLLBACK; top-level catch in handlers |
-| MCP Server | stdio transport incompatible with logging to stdout | Use stderr or HTTP transport; decide before logging phase |
-| MCP Server | Tool schemas drift from domain types | Derive from existing Zod schemas; validate with tests |
+| SDK/library mode | Signal handler registration in the host process | Default `registerSignalHandlers: false`; document host owns shutdown |
+| SDK/library mode | Internal storage types leaked as public API | Define `src/sdk/types.ts` with stable public shapes; map at boundary |
+| SDK/library mode | `stop()` does not drain in-flight workers | Await `Promise.allSettled(activeWorkers)` before `database.close()` |
+| SDK/library mode | Dual-instance from CJS/ESM mixing in tests | ESM-only publish; no CJS entry point |
+| Event schema registry | Strict validation rejects existing agents on rollout | Warn mode first; strict opt-in per topic; `.passthrough()` default |
+| Event schema registry | JSON Schema vs Zod format decision | JSON Schema + Ajv for user schemas; Zod only for internal validation |
+| Event schema registry | Validation inside transaction adds write latency | Validate before `BEGIN`; compile validators once at startup |
+| Web dashboard | Second HTTP server port conflict with MCP server | `Promise.all` startup; fail fast on port == mcpPort; cleanup both on failure |
+| Web dashboard | Dashboard uses shared write connection | Read-only connection with `PRAGMA query_only = ON`; confirm WAL active |
+| Web dashboard | SSE connections prevent `stop()` from resolving | `server.closeAllConnections()` before `server.close()` |
+| Plugin adapter system | ESM module cache: plugins cannot be hot-reloaded | Document: restart required; validate path before `import()` |
+| Plugin adapter system | Plugins call `process.exit()` or register signal handlers | Explicit plugin contract prohibition; test with mock exit |
+| Plugin adapter system | Closed `SupportedRuntimeFamilySchema` enum blocks plugin runtimes | Replace with open `Map`-based registry |
+| Plugin adapter system | Plugin runtime not registered causes silent generic fallback | Startup validation: every manifest `runtime` must have a registered adapter |
 
 ---
 
 ## Sources
 
-- Codebase analysis: `src/adapters/process-runner.ts`, `src/daemon/adapter-worker.ts`, `src/daemon/delivery-service.ts`, `src/storage/delivery-store.ts`, `src/storage/sqlite-client.ts`, `src/daemon/index.ts`, `src/daemon/recovery-scan.ts`, `src/adapters/registry.ts` — HIGH confidence (direct read)
-- Node.js `child_process.spawn` documentation on process groups and signal delivery — HIGH confidence (well-documented platform behavior)
-- SQLite WAL mode write serialization and `busy_timeout` scope — HIGH confidence (SQLite official documentation)
-- MCP stdio transport specification exclusivity of stdout — MEDIUM confidence (protocol specification, embedding patterns less documented)
-- Node.js `DatabaseSync` thread-safety — HIGH confidence (experimental API docs clearly state single-thread use)
+- Codebase analysis (direct read): `src/daemon/index.ts`, `src/daemon/adapter-worker.ts`, `src/adapters/registry.ts`, `src/adapters/contract.ts`, `src/daemon/mcp-server.ts`, `src/config/manifest-schema.ts`, `src/domain/event-envelope.ts` — HIGH confidence
+- Node.js ESM module cache behavior: [Node.js ESM documentation](https://nodejs.org/api/esm.html) — HIGH confidence (platform invariant)
+- Node.js `http.Server.close()` keep-alive connection behavior: Node.js HTTP documentation and [Socket.IO EADDRINUSE handling](https://socket.io/how-to/handle-eaddrinused-errors) — HIGH confidence (documented platform behavior)
+- `server.closeAllConnections()` API (Node.js 18.2+): Node.js HTTP docs — HIGH confidence
+- Signal handler SDK pitfall precedent: [SIGINT/SIGTERM handlers prevent graceful shutdown — openai-agents-js issue #175](https://github.com/openai/openai-agents-js/issues/175) — MEDIUM confidence (specific library, generalizable pattern)
+- Schema registry enforcement modes: [Confluent Schema Registry fundamentals](https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html) and [Solace schema registry best practices](https://docs.solace.com/Schema-Registry/schema-registry-best-practices.htm) — MEDIUM confidence (distributed systems patterns, applied to local use case)
+- JSON Schema vs Zod for user-defined schemas: [Event versioning strategies](https://theburningmonk.com/2025/04/event-versioning-strategies-for-event-driven-architectures/) — MEDIUM confidence (pattern-derived)
+- SQLite WAL snapshot isolation behavior: SQLite official WAL documentation — HIGH confidence

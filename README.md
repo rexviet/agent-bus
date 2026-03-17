@@ -1,211 +1,115 @@
 # Agent Bus
 
-`agent-bus` is a local-first, event-driven orchestration protocol and runtime for multi-agent work inside a single repository.
+`agent-bus` is a local-first, event-driven orchestration runtime for multi-agent work inside one repository.
 
-Instead of asking one agent to synchronously call another agent and wait for a response, Agent Bus turns collaboration into durable workflow events:
+It turns agent collaboration into durable workflow events stored in SQLite, with retry/replay, approval gates, and artifact-based handoff.
 
-- a producer publishes an event envelope
-- the bus persists it in SQLite
-- the bus fans out one or more deliveries
-- optional human approval gates can stop delivery before execution
-- a worker launches the target agent through a runtime adapter
-- the agent writes output artifacts plus a result envelope
-- the bus retries, dead-letters, or republishes follow-up events as needed
+## New Highlights
 
-This gives you a repository-local coordination layer with durable state, replay, approval, and auditability, without needing distributed infrastructure.
+### 1) `/sync-planning-to-gsd`
 
-## Why This Protocol Exists
+Project canonical planning docs from `.planning/` into execution workspace `.gsd/`.
 
-Direct synchronous agent-to-agent handoffs are fine for simple request/response flows, but they tend to break down when the work becomes operational:
+What it enables:
+- Planning stays canonical in `.planning/`
+- Antigravity/Codex execution reads from `.gsd/`
+- Synced files are fingerprint-stamped so later handoff can detect drift safely
 
-- one agent crashes after producing useful artifacts but before the caller records success
-- a human needs to approve an intermediate result before the next agent runs
-- a long-running tool call times out and no one knows whether to retry safely
-- outputs are large files, not small text responses
-- you need a durable record of who produced what, when, and why it was replayed
+Entry points:
+- Workflow doc: [`.agent/workflows/sync-planning-to-gsd.md`](.agent/workflows/sync-planning-to-gsd.md)
+- Script: [`scripts/sync-planning-to-gsd.mjs`](scripts/sync-planning-to-gsd.mjs)
 
-Agent Bus exists to make these workflows explicit and durable.
+Examples:
 
-It does that by treating collaboration as a sequence of persisted events and deliveries rather than transient in-memory calls.
+```bash
+node scripts/sync-planning-to-gsd.mjs
+node scripts/sync-planning-to-gsd.mjs --phase 6
+node scripts/sync-planning-to-gsd.mjs --phase 6 --phases-only
+node scripts/sync-planning-to-gsd.mjs --root-only
+```
 
-## Why Use This Instead Of Sync Agent-to-Agent Calls?
+### 2) `/handoff-execution <phase-number>`
 
-The comparison below is an inference from how this repository is designed and what problems it solves.
+Bring verified execution results from `.gsd/` back to canonical `.planning/`.
 
-| Concern | Direct Agent-to-Agent Sync | Agent Bus |
+What it enables:
+- Execution updates become authoritative in planning docs
+- Handoff refuses to overwrite if planning changed after last sync
+- Execution-only hints are removed from canonical planning state
+
+Entry points:
+- Workflow doc: [`.agent/workflows/handoff-execution.md`](.agent/workflows/handoff-execution.md)
+- Script: [`scripts/handoff-execution-to-planning.mjs`](scripts/handoff-execution-to-planning.mjs)
+- Test: [`test/scripts/handoff-execution-to-planning.test.ts`](test/scripts/handoff-execution-to-planning.test.ts)
+
+Example:
+
+```bash
+node scripts/handoff-execution-to-planning.mjs 6
+```
+
+## Canonical Planning Loop
+
+Use this sequence for each execution wave:
+
+1. Plan/research in `.planning/`
+2. Sync projection into `.gsd/`:
+
+```bash
+node scripts/sync-planning-to-gsd.mjs --phase 6
+```
+
+3. Execute/verify from `.gsd/`
+4. Handoff execution results back into canonical planning:
+
+```bash
+node scripts/handoff-execution-to-planning.mjs 6
+```
+
+5. Continue planning from updated `.planning/`
+
+## Why Agent Bus Instead Of Sync Agent-to-Agent Calls?
+
+| Concern | Direct Sync Calls | Agent Bus |
 | --- | --- | --- |
-| Control flow | Caller blocks until callee finishes | Producer publishes an event and the bus manages delivery asynchronously |
-| Failure handling | Caller must decide retry semantics | Retry, dead-letter, and replay are first-class runtime features |
-| Human approval | Usually ad hoc and out-of-band | Approval gates are part of the manifest and durable state |
-| Audit trail | Scattered across logs and prompts | Events, deliveries, approvals, and run metadata are persisted |
-| Artifact handoff | Often inline text blobs | Repository-relative artifact references are first-class |
-| Recovery after restart | Usually fragile | Durable SQLite state plus recovery scan support restart-safe operation |
-| Coupling | Tight coupling between caller and callee lifecycle | Loose coupling through topics and subscriptions |
-| Fan-out | Caller must manually invoke multiple agents | One event can fan out to multiple subscribers |
-| Replay | Often manual and error-prone | Replay commands exist for events and failed deliveries |
-| Latency | Lower for tiny request/response loops | Higher, but much safer for workflow orchestration |
+| Failure handling | Caller owns retry logic | Retry, dead-letter, replay built in |
+| Human gates | Ad hoc | Durable approval gates |
+| Audit trail | Prompt/log scattered | Persisted events, deliveries, approvals |
+| Artifact handoff | Usually inline text | Repository file references |
+| Recovery | Fragile | Restart-safe SQLite state |
+| Fan-out | Manual multi-call | Topic subscriptions |
 
-If you only need a fast, blocking request from agent A to agent B, direct sync can be simpler.
-
-If you need approval, retries, replay, artifact handoff, or durable workflow history, Agent Bus is the better fit.
+If you only need small blocking request/response, direct sync can be simpler.
+If you need durable workflow operations, Agent Bus is the safer default.
 
 ## Protocol Overview
 
-Agent Bus uses three core message shapes.
+Agent Bus revolves around three payloads:
 
-### 1. Event Envelope
+1. Event envelope (producer publishes)
+2. Adapter work package (bus materializes for target agent)
+3. Adapter result envelope (agent writes execution outcome)
 
-This is the message a producer publishes into the bus.
-
-```json
-{
-  "eventId": "550e8400-e29b-41d4-a716-446655440801",
-  "topic": "plan_done",
-  "runId": "run-demo-001",
-  "correlationId": "run-demo-001",
-  "dedupeKey": "plan_done:run-demo-001",
-  "occurredAt": "2026-03-10T08:00:00Z",
-  "producer": {
-    "agentId": "ba_codex",
-    "runtime": "codex"
-  },
-  "payload": {
-    "title": "Operator workflow demo"
-  },
-  "payloadMetadata": {
-    "demo": true
-  },
-  "artifactRefs": [
-    {
-      "path": "docs/plan.md",
-      "role": "primary",
-      "description": "Approved plan artifact."
-    }
-  ]
-}
-```
-
-Important characteristics:
-
-- `topic` is the routing key
-- `runId` groups the full workflow
-- `correlationId` links related events in the same run
-- `causationId` is optional and links a follow-up event to its source event
-- `dedupeKey` is how duplicate processing is detected or suppressed
-- `artifactRefs` point to repository files instead of embedding large file contents
-
-### 2. Adapter Work Package
-
-This is generated by the bus for the target agent. The agent does not read SQLite directly.
-
-The work package includes:
-
-- the target agent identity and runtime
-- the claimed delivery metadata
-- the source event metadata
-- resolved artifact inputs with absolute filesystem paths
-- workspace paths for artifacts, logs, and result writing
-
-The adapter contract is defined in [`src/adapters/contract.ts`](src/adapters/contract.ts).
-
-### 3. Adapter Result Envelope
-
-This is what the agent writes back after execution.
-
-Successful result:
-
-```json
-{
-  "schemaVersion": 1,
-  "status": "success",
-  "summary": "Generated the requested artifact.",
-  "outputArtifacts": [
-    {
-      "path": "docs/system-design.md",
-      "role": "primary",
-      "description": "Generated system design."
-    }
-  ],
-  "events": []
-}
-```
-
-Retryable failure:
-
-```json
-{
-  "schemaVersion": 1,
-  "status": "retryable_error",
-  "errorMessage": "Temporary model failure.",
-  "retryDelayMs": 30000,
-  "outputArtifacts": [],
-  "events": []
-}
-```
-
-Fatal failure:
-
-```json
-{
-  "schemaVersion": 1,
-  "status": "fatal_error",
-  "errorMessage": "Invalid input artifact.",
-  "outputArtifacts": [],
-  "events": []
-}
-```
+Contract reference: [`src/adapters/contract.ts`](src/adapters/contract.ts)
 
 ## Core Concepts
 
 | Term | Meaning |
 | --- | --- |
 | Run | One end-to-end workflow instance |
-| Event | An immutable fact published into the bus |
-| Delivery | A bus-assigned unit of work for one subscribed agent |
-| Approval | A durable human gate attached to a topic |
-| Artifact | A repository file referenced by relative path |
-| Replay | Re-queueing a failed delivery or historical event without touching SQLite manually |
-
-## Architecture
-
-At a high level, the runtime works like this:
-
-1. A producer publishes an event envelope.
-2. The bus persists the event, creates the run if needed, and fans out matching deliveries.
-3. If the topic requires approval, deliveries stay in `pending_approval` until a human approves.
-4. A worker claims a ready delivery and generates a work package on disk.
-5. The runtime adapter launches the target command and injects the work package path through environment variables.
-6. The agent writes a result envelope and any output artifacts.
-7. The bus acknowledges the delivery, republishes follow-up events, or schedules retry/dead-letter handling.
-8. Operators inspect runs, approvals, failures, and replay work through the CLI.
-
-## What Is Durable?
-
-Agent Bus persists workflow state in SQLite under the repository's state directory.
-
-By default:
-
-- database: `.agent-bus/state/agent-bus.sqlite`
-- artifacts: `workspace/`
-- logs: `.agent-bus/logs/`
-
-The runtime uses WAL mode for SQLite and treats the repository as the unit of isolation.
+| Event | Immutable fact published into bus |
+| Delivery | One bus-assigned unit of work for one subscriber |
+| Approval | Durable human gate for a topic |
+| Artifact | Repository-relative file reference |
+| Replay | Re-queue event/delivery without manual DB edits |
 
 ## Installation
 
-This project is currently installed from source.
-
 ### Prerequisites
 
-- Node.js `22.12.0` or newer
+- Node.js `22.12.0`+
 - `nvm` recommended
-- optional agent runtimes depending on your manifest:
-  - `codex`
-  - `opencode` or `open-code`
-  - `gemini`
-  - any other executable if you use the generic manifest-command fallback
-
-If you use the built-in Gemini adapter, install the `gemini` CLI separately and make sure it is already authenticated before running workers.
+- optional runtimes depending on manifest (`codex`, `open-code`, `gemini`, etc.)
 
 ### Install From Source
 
@@ -221,35 +125,24 @@ npm install
 npm run build
 ```
 
-### Global CLI For Local Development
-
-This repository is not published as a public npm package yet, but you can still expose a real global `agent-bus` binary from your local checkout:
+### Optional Global Link
 
 ```bash
 npm run link:global
 agent-bus --help
 ```
 
-The linked `agent-bus` wrapper resolves `dist/cli.js` from this repository and runs it with `node --experimental-sqlite`. If your current `node` is older than `22.12.0`, it will try to load `nvm` and switch to the version declared in `.nvmrc` automatically.
-
-To remove the global link later:
+Unlink later:
 
 ```bash
 npm run unlink:global
 ```
 
-### Validate The Build
-
-```bash
-node --experimental-sqlite dist/cli.js validate-manifest agent-bus.example.yaml
-node --experimental-sqlite dist/cli.js validate-manifest agent-bus.yaml
-```
-
 ## Configuration
 
-Agent Bus is configured with a repository-local YAML manifest, usually `agent-bus.yaml`.
+Manifest file is repository-local YAML, typically `agent-bus.yaml`.
 
-### Minimal Manifest Shape
+Minimum shape:
 
 ```yaml
 version: 1
@@ -262,117 +155,15 @@ agents:
   - id: planner
     runtime: codex
     command: [codex, exec]
-  - id: designer
-    runtime: claude-code
-    command: [claude, run, --mode, design]
 
 subscriptions:
-  - agentId: designer
+  - agentId: planner
     topic: plan_done
-    requiredArtifacts:
-      - path: docs/plan.md
-        role: input
-
-approvalGates:
-  - topic: plan_done
-    decision: manual
-    approvers: [human]
-    onReject: return_to_producer
-
-artifactConventions:
-  - topic: plan_done
-    outputs:
-      - path: docs/plan.md
-        role: primary
 ```
 
-### Manifest Sections
-
-#### `workspace`
-
-Defines where the bus stores:
-
-- generated artifacts
-- durable runtime state
-- logs
-
-All paths are repository-relative and must stay inside the repo.
-
-#### `agents`
-
-Each agent declares:
-
-- `id`: stable workflow identity
-- `runtime`: descriptive runtime family
-- `command`: executable plus args
-- optional `workingDirectory`
-- optional `environment`
-
-Special handling exists for `codex`, `open-code`, and `gemini`.
-
-The Gemini adapter runs in headless prompt mode through `gemini -p` and defaults to `--approval-mode auto_edit` unless you override that in the manifest command arguments.
-
-If `runtime` is unknown or the executable does not match a built-in runtime adapter, Agent Bus falls back to the manifest command as-is. That is how you can integrate custom wrappers or other CLIs.
-
-#### `subscriptions`
-
-Each subscription says:
-
-- which `agentId` should receive a topic
-- which `topic` should trigger it
-- which artifacts are required for the delivery to be valid
-
-One event can fan out to many subscribers.
-
-#### `approvalGates`
-
-Each gate says:
-
-- which topic requires approval
-- who is allowed to approve it
-- what happens on rejection
-
-Current decisions are manual. Current rejection policies are:
-
-- `return_to_producer`
-- `cancel_run`
-
-#### `artifactConventions`
-
-This documents expected outputs for a topic. It is useful for workflow clarity and for downstream consumers.
-
-### Validation Rules
-
-Some important rules enforced by the schema:
-
-- agent IDs must start with a letter and use lowercase letters, digits, `_`, or `-`
-- topics must use lowercase letters, digits, `.`, `_`, or `-`
-- artifact paths must stay inside the repository
-- commands must be non-empty arrays
-
-## Adapter Contract
-
-When Agent Bus launches an agent, it passes key paths through environment variables:
-
-- `AGENT_BUS_SCHEMA_VERSION`
-- `AGENT_BUS_AGENT_ID`
-- `AGENT_BUS_RUNTIME`
-- `AGENT_BUS_WORK_PACKAGE_PATH`
-- `AGENT_BUS_RESULT_FILE_PATH`
-- `AGENT_BUS_LOG_FILE_PATH`
-
-A custom agent typically does four things:
-
-1. read the JSON work package from `AGENT_BUS_WORK_PACKAGE_PATH`
-2. read input artifacts from `artifactInputs[].absolutePath`
-3. write output artifacts into the repository workspace
-4. write a result envelope to `AGENT_BUS_RESULT_FILE_PATH`
-
-See the deterministic fixture agent in [`test/fixtures/agents/demo-agent.mjs`](test/fixtures/agents/demo-agent.mjs) for a concrete implementation.
+Full schema reference: [`src/config/manifest-schema.ts`](src/config/manifest-schema.ts)
 
 ## CLI Usage
-
-The current CLI surface is operator-focused.
 
 ```text
 agent-bus daemon [--config path] [--exit-after-ready]
@@ -386,183 +177,39 @@ agent-bus replay <target>
 agent-bus publish --envelope <file>
 ```
 
-### Show Resolved Paths
-
-```bash
-node --experimental-sqlite dist/cli.js layout --config agent-bus.yaml --ensure
-```
-
-### Validate A Manifest
+Common commands:
 
 ```bash
 node --experimental-sqlite dist/cli.js validate-manifest agent-bus.yaml
+node --experimental-sqlite dist/cli.js layout --config agent-bus.yaml --ensure
+node --experimental-sqlite dist/cli.js worker --config agent-bus.yaml --worker-id worker-1 --once
 ```
 
-### Publish An Event
+## Testing The New Handoff Guardrails
 
-`publish` currently expects a JSON event envelope file.
+Run the focused test for sync/handoff behavior:
 
 ```bash
-node --experimental-sqlite dist/cli.js publish \
-  --config agent-bus.yaml \
-  --envelope path/to/event.json
+node --test test/scripts/handoff-execution-to-planning.test.ts
 ```
-
-### Inspect Runs
-
-```bash
-node --experimental-sqlite dist/cli.js runs list --config agent-bus.yaml
-node --experimental-sqlite dist/cli.js runs show run-001 --config agent-bus.yaml --json
-```
-
-### Handle Approvals
-
-```bash
-node --experimental-sqlite dist/cli.js approvals list --config agent-bus.yaml
-
-node --experimental-sqlite dist/cli.js approvals approve \
-  approval:<event-id> \
-  --config agent-bus.yaml \
-  --by human-reviewer
-
-node --experimental-sqlite dist/cli.js approvals reject \
-  approval:<event-id> \
-  --config agent-bus.yaml \
-  --by human-reviewer \
-  --feedback "Please revise the plan."
-```
-
-### Inspect Failures
-
-```bash
-node --experimental-sqlite dist/cli.js failures list --config agent-bus.yaml
-```
-
-### Replay
-
-```bash
-node --experimental-sqlite dist/cli.js replay delivery <delivery-id> --config agent-bus.yaml
-node --experimental-sqlite dist/cli.js replay event <event-id> --config agent-bus.yaml
-```
-
-### Run A Worker
-
-Use `worker` when you want the CLI itself to claim and execute ready deliveries without writing a custom Node harness.
-
-Run continuously:
-
-```bash
-node --experimental-sqlite dist/cli.js worker \
-  --config agent-bus.yaml \
-  --worker-id worker-1
-```
-
-Run a single iteration and exit:
-
-```bash
-node --experimental-sqlite dist/cli.js worker \
-  --config agent-bus.yaml \
-  --worker-id worker-1 \
-  --once
-```
-
-The worker loop claims one ready delivery at a time, materializes a work package, launches the target adapter command, and records the delivery result back into SQLite.
-
-## Programmatic Worker Execution
-
-The daemon API still exposes `runWorkerIteration(...)` directly if you want to embed Agent Bus in custom tooling.
-
-That is useful for advanced integration, but it is no longer required for normal local execution.
-
-Example:
-
-```js
-import { startDaemon } from "./dist/daemon/index.js";
-
-const daemon = await startDaemon({
-  configPath: "agent-bus.yaml",
-  repositoryRoot: process.cwd(),
-  registerSignalHandlers: false
-});
-
-try {
-  const result = await daemon.runWorkerIteration("worker-1", 60_000);
-  console.log(result);
-} finally {
-  await daemon.stop();
-}
-```
-
-The CLI worker is a thin loop over the same daemon API, so both surfaces share the same execution behavior.
-
-## Quick Start With The Included Example
-
-The repository ships:
-
-- [`agent-bus.example.yaml`](agent-bus.example.yaml)
-- [`agent-bus.yaml`](agent-bus.yaml)
-- a deterministic operator demo under [`examples/operator-demo/`](examples/operator-demo/)
-
-For the full deterministic workflow, see [`docs/operator-workflow-demo.md`](docs/operator-workflow-demo.md).
-
-At a high level:
-
-1. build the project
-2. publish the demo envelope
-3. inspect the pending approval
-4. approve it
-5. run the worker CLI
-6. inspect failures
-7. replay the failed delivery
-8. run one more worker iteration
-9. inspect the final run state
-
-If you already ran the demo once, reset it with:
-
-```bash
-node examples/operator-demo/reset-demo.mjs
-```
-
-## What Agent Bus Is Good At
-
-Agent Bus is a strong fit when you want:
-
-- one-machine, one-repository orchestration
-- explicit artifact handoff between agents
-- durable retries and replay
-- human approval before downstream work
-- deterministic local demos and tests
-- runtime heterogeneity behind one manifest
-
-## What It Is Not
-
-Agent Bus is not trying to be:
-
-- a distributed message broker
-- a cloud control plane
-- a general RPC replacement
-- a UI-first orchestration product
-
-It is intentionally local-first and repository-scoped.
 
 ## Current Feature Set
 
-The current implementation covers:
-
-- repository-local workflow manifests
-- typed event envelopes
-- durable event, delivery, approval, and run state in SQLite
-- at-least-once delivery with retry and dead-letter handling
-- replay for historical events and failed deliveries
-- runtime adapter contract for Codex, Open Code, Antigravity, and generic commands
-- operator CLI for inspection, approval, rejection, failure review, replay, and envelope-based publish
+- Repository-local workflow manifests
+- Typed event envelopes
+- Durable state in SQLite (runs/events/deliveries/approvals)
+- At-least-once delivery with retry and dead-letter
+- Replay for failed deliveries and historical events
+- Runtime adapters for Codex, Open Code, Antigravity, and generic commands
+- Operator CLI for inspect/approve/reject/replay/publish
+- Planning projection workflow: `.planning/` -> `.gsd/` (`/sync-planning-to-gsd`)
+- Canonical handoff workflow: `.gsd/` -> `.planning/` (`/handoff-execution`)
 
 ## References
 
-- [`agent-bus.example.yaml`](agent-bus.example.yaml)
 - [`agent-bus.yaml`](agent-bus.yaml)
+- [`agent-bus.example.yaml`](agent-bus.example.yaml)
 - [`docs/operator-workflow-demo.md`](docs/operator-workflow-demo.md)
 - [`docs/model-selection-playbook.md`](docs/model-selection-playbook.md)
-- [`src/config/manifest-schema.ts`](src/config/manifest-schema.ts)
 - [`src/domain/event-envelope.ts`](src/domain/event-envelope.ts)
 - [`src/adapters/contract.ts`](src/adapters/contract.ts)
