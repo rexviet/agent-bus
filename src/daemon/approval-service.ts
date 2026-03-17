@@ -81,6 +81,14 @@ export function createApprovalService({
           dispatcher.handleReadyDelivery(delivery);
         }
       }
+      dispatcher.dashboardEmitter.emit("dashboard", {
+        type: "approval.decided",
+        payload: {
+          approvalId: approval.approvalId,
+          status: "approved",
+          decidedBy: input.decidedBy
+        }
+      });
 
       return { approval, event, deliveries };
     },
@@ -117,6 +125,14 @@ export function createApprovalService({
         database.exec("ROLLBACK");
         throw error;
       }
+      dispatcher.dashboardEmitter.emit("dashboard", {
+        type: "approval.decided",
+        payload: {
+          approvalId: approval.approvalId,
+          status: "rejected",
+          decidedBy: input.decidedBy
+        }
+      });
 
       return { approval, event, deliveries };
     }
