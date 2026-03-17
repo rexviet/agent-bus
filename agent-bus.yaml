@@ -20,6 +20,15 @@ agents:
     environment:
       CODEX_QUIET: "1"
 
+  - id: shipper_haiku
+    runtime: claude-code
+    description: Pushes the implementation branch and opens a GitHub PR after Codex finishes coding.
+    identityFile: .agent/identities/shipper.md
+    command:
+      - claude
+      - --model
+      - claude-haiku-4-5-20251001
+
   - id: reviewer_claude
     runtime: claude-code
     description: Code reviewer running Claude Opus via Claude Code CLI.
@@ -34,9 +43,13 @@ subscriptions:
     topic: plan_done
     description: Sync planning docs to GSD and execute the phase after Claude finishes planning.
 
+  - agentId: shipper_haiku
+    topic: implement_done
+    description: Push the implementation branch and create a GitHub PR after Codex finishes coding.
+
   - agentId: reviewer_claude
     topic: pr_ready
-    description: Review the pull request after Codex creates it.
+    description: Review the pull request after the shipper creates it.
 
 approvalGates: []
 
