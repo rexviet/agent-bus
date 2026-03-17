@@ -1,5 +1,3 @@
-import { EventEmitter } from "node:events";
-
 import type { PersistedDeliveryRecord } from "../storage/delivery-store.js";
 import type { PendingApprovalRecord, PersistedEventRecord } from "../storage/event-store.js";
 
@@ -19,19 +17,6 @@ export interface DispatchNotification {
   readonly availableAt?: string;
 }
 
-export type DashboardEventType =
-  | "delivery.state_changed"
-  | "approval.created"
-  | "approval.decided"
-  | "event.published";
-
-export interface DashboardEvent {
-  readonly type: DashboardEventType;
-  readonly payload: Record<string, unknown>;
-}
-
-export type DashboardEmitter = EventEmitter<{ dashboard: [DashboardEvent] }>;
-
 function createNotificationKey(notification: DispatchNotification): string {
   return notification.state === "ready_for_delivery"
     ? `${notification.state}:${notification.deliveryId ?? notification.eventId}:${
@@ -45,7 +30,6 @@ function createNotificationKey(notification: DispatchNotification): string {
 export function createDispatcher() {
   const notifications: DispatchNotification[] = [];
   const seenNotificationKeys = new Set<string>();
-  const dashboardEmitter: DashboardEmitter = new EventEmitter();
 
   function recordNotification(notification: DispatchNotification): DispatchNotification {
     const notificationKey = createNotificationKey(notification);
@@ -60,49 +44,26 @@ export function createDispatcher() {
 
   return {
     handlePersistedEvent(event: PersistedEventRecord): DispatchNotification {
-      const notification = recordNotification({
+      return recordNotification({
         eventId: event.eventId,
         topic: event.topic,
         state: event.approvalStatus === "pending" ? "approval_pending" : "ready_for_delivery",
         recordedAt: new Date().toISOString()
       });
-
-      dashboardEmitter.emit("dashboard", {
-        type: "event.published",
-        payload: {
-          eventId: event.eventId,
-          runId: event.runId,
-          topic: event.topic
-        }
-      });
-
-      return notification;
     },
 
     handlePendingApproval(approval: PendingApprovalRecord): DispatchNotification {
-      const notification = recordNotification({
+      return recordNotification({
         eventId: approval.eventId,
         topic: approval.topic,
         state: "approval_pending",
         approvalId: approval.approvalId,
         recordedAt: new Date().toISOString()
       });
-
-      dashboardEmitter.emit("dashboard", {
-        type: "approval.created",
-        payload: {
-          approvalId: approval.approvalId,
-          eventId: approval.eventId,
-          runId: approval.runId,
-          topic: approval.topic
-        }
-      });
-
-      return notification;
     },
 
     handleReadyDelivery(delivery: PersistedDeliveryRecord): DispatchNotification {
-      const notification = recordNotification({
+      return recordNotification({
         eventId: delivery.eventId,
         topic: delivery.topic,
         state: "ready_for_delivery",
@@ -114,29 +75,11 @@ export function createDispatcher() {
         availableAt: delivery.availableAt,
         recordedAt: new Date().toISOString()
       });
-
-      const deliveryRunId = (delivery as PersistedDeliveryRecord & { runId?: string }).runId;
-
-      dashboardEmitter.emit("dashboard", {
-        type: "delivery.state_changed",
-        payload: {
-          deliveryId: delivery.deliveryId,
-          eventId: delivery.eventId,
-          ...(deliveryRunId ? { runId: deliveryRunId } : {}),
-          agentId: delivery.agentId,
-          oldState: undefined,
-          newState: delivery.status
-        }
-      });
-
-      return notification;
     },
 
     snapshot(): DispatchNotification[] {
       return [...notifications];
-    },
-
-    dashboardEmitter
+    }
   };
 }
 

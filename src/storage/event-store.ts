@@ -7,7 +7,6 @@ export type ApprovalStatus = "not_required" | "pending" | "approved" | "rejected
 export interface PendingApprovalRecord {
   readonly approvalId: string;
   readonly eventId: string;
-  readonly runId: string;
   readonly topic: string;
   readonly status: string;
   readonly requestedAt: string;
@@ -70,7 +69,6 @@ interface EventArtifactRow {
 interface ApprovalRow {
   approval_id: string;
   event_id: string;
-  run_id: string;
   topic: string;
   status: string;
   requested_at: string;
@@ -205,11 +203,10 @@ export function createEventStore(database: DatabaseSync) {
     ORDER BY path ASC
   `);
   const selectPendingApprovals = database.prepare(`
-    SELECT a.approval_id, a.event_id, e.run_id, a.topic, a.status, a.requested_at
-    FROM approvals a
-    INNER JOIN events e ON e.event_id = a.event_id
+    SELECT approval_id, event_id, topic, status, requested_at
+    FROM approvals
     WHERE status = 'pending'
-    ORDER BY a.requested_at ASC
+    ORDER BY requested_at ASC
   `);
   const updateApprovalStatus = database.prepare(`
     UPDATE events
@@ -315,7 +312,6 @@ export function createEventStore(database: DatabaseSync) {
       return approvalRows.map((row) => ({
         approvalId: row.approval_id,
         eventId: row.event_id,
-        runId: row.run_id,
         topic: row.topic,
         status: row.status,
         requestedAt: row.requested_at

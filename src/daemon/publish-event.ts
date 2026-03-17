@@ -34,7 +34,6 @@ function buildPendingApprovalRecord(
   return {
     approvalId,
     eventId: event.eventId,
-    runId: event.runId,
     topic: event.topic,
     status: "pending",
     requestedAt: event.createdAt

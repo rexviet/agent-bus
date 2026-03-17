@@ -75,7 +75,6 @@ test("run and event stores persist runs, events, artifacts, and approvals", asyn
         {
           approvalId: "approval:550e8400-e29b-41d4-a716-446655440001",
           eventId: "550e8400-e29b-41d4-a716-446655440001",
-          runId: "run-001",
           topic: "plan_done",
           status: "pending",
           requestedAt: persistedEvent.createdAt
