@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm run build        # Compile TypeScript + copy migrations to dist/
 npm run typecheck    # Type-check without emitting
-npm test             # Build then run tests (requires Node 22.12+)
+npm test             # Build then run tests (requires Node 24+)
 npm run start        # Run the CLI (after build)
 npm run daemon       # Start the daemon service
 npm run link:global  # Build and install `agent-bus` binary globally
@@ -15,10 +15,10 @@ npm run link:global  # Build and install `agent-bus` binary globally
 
 Run a single test file:
 ```bash
-node --experimental-sqlite --test dist/test/path/to/file.test.js
+node --test dist/test/path/to/file.test.js
 ```
 
-> **Node.js 22.12+ is required.** The runtime uses the built-in `node:sqlite` module (experimental). The `bin/agent-bus` wrapper automatically loads nvm if needed.
+> **Node.js 24+ is required.** The runtime uses the built-in `node:sqlite` module. The `bin/agent-bus` wrapper automatically loads nvm if needed.
 
 ## Architecture
 
