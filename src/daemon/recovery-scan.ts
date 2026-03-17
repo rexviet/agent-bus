@@ -38,7 +38,20 @@ export function createRecoveryScan({
     const readyDeliveries = deliveryStore.listReadyDeliveries();
 
     for (const approval of pendingApprovals) {
-      dispatcher.handlePendingApproval(approval);
+      const event = eventStore.getEvent(approval.eventId);
+
+      if (!event) {
+        continue;
+      }
+
+      dispatcher.handlePendingApproval({
+        approvalId: approval.approvalId,
+        eventId: approval.eventId,
+        runId: event.runId,
+        topic: approval.topic,
+        status: approval.status,
+        requestedAt: approval.requestedAt
+      });
     }
 
     for (const delivery of readyDeliveries) {

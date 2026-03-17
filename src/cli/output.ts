@@ -260,6 +260,7 @@ export function writeWorkerStartedText(
     readonly drainTimeoutMs: number;
     readonly retryDelayMs?: number;
     readonly mcpUrl: string;
+    readonly dashboardUrl: string;
     readonly once: boolean;
   }
 ): void {
@@ -276,6 +277,7 @@ export function writeWorkerStartedText(
   }
 
   writeLine(stream, `mcp: ${options.mcpUrl}`);
+  writeLine(stream, `dashboard: ${options.dashboardUrl}`);
 }
 
 export function writeWorkerExecutionText(
