@@ -1,12 +1,26 @@
 node_modules/
 dist/
 
+# Runtime state (generated at runtime)
 .agent-bus/state/*
 .agent-bus/logs/*
+.agent-bus/artifacts/*
 .agent-bus/demo-state/*
 .agent-bus/demo-logs/*
 !.agent-bus/state/.gitkeep
 !.agent-bus/logs/.gitkeep
 
+# Planning & GSD (versioned in agent-bus-ops private repo)
+.planning
+.gsd
+
+# GSD framework files (versioned in agent-bus-ops private repo)
+.agent/workflows
+.agent/skills
+
+# AI tool configs (versioned in agent-bus-ops private repo)
+.gemini
+
+# Misc
 examples/my-test-project/
 techlead-feedback.md
