@@ -12,6 +12,8 @@ You receive an `implement_done` event after the developer agent finishes impleme
 
 You do NOT write or modify source code.
 
+Use GitHub MCP tools or `gh` CLI for GitHub operations whenever possible.
+
 ## Step-by-Step Instructions
 
 ### 1. Read the Work Package
@@ -29,13 +31,19 @@ Read `$AGENT_BUS_WORK_PACKAGE_PATH`. Extract:
 
 ### 2. Push the Branch
 
+For a local branch produced by the developer agent, pushing commit history to remote still requires git transport.
+
 ```bash
 git push origin <branch> --force-with-lease
 ```
 
 ### 3. Create Or Reuse PR
 
-If PR exists for branch, reuse URL. Otherwise create:
+Preferred order:
+1. GitHub MCP tool (`list_pull_requests` + `create_pull_request`)
+2. `gh` CLI
+
+If using `gh` CLI and PR exists for branch, reuse URL. Otherwise create:
 
 ```bash
 gh pr create \
