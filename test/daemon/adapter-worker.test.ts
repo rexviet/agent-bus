@@ -1038,3 +1038,162 @@ artifactConventions: []
     }
   );
 });
+
+test("heartbeat prevents lease expiry for long-running agent execution", async () => {
+  await withTempRepo(
+    `version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+
+agents:
+  - id: slow_coder
+    runtime: open-code
+    command: ["${process.execPath}", "${successAdapterPath}"]
+
+subscriptions:
+  - agentId: slow_coder
+    topic: implementation_ready
+
+approvalGates: []
+artifactConventions: []
+`,
+    async (configPath, repositoryRoot) => {
+      // recoveryIntervalMs is aggressive so it would reclaim the lease if heartbeat were absent
+      const daemon = await startDaemon({
+        configPath,
+        repositoryRoot,
+        registerSignalHandlers: false,
+        recoveryIntervalMs: 5
+      });
+
+      try {
+        daemon.publish(
+          parseEventEnvelope({
+            eventId: "550e8400-e29b-41d4-a716-446655440313",
+            topic: "implementation_ready",
+            runId: "run-heartbeat-alive-001",
+            correlationId: "run-heartbeat-alive-001",
+            dedupeKey: "implementation_ready:run-heartbeat-alive-001",
+            occurredAt: "2026-03-10T11:00:00Z",
+            producer: { agentId: "planner_codex", runtime: "codex" },
+            // Agent sleeps longer than the lease duration
+            payload: { delayMs: 200 },
+            payloadMetadata: {},
+            artifactRefs: []
+          })
+        );
+
+        // leaseDurationMs=60ms: without heartbeat, the 5ms recovery scan would reclaim
+        // the lease at ~65ms, before the 200ms agent finishes. heartbeatIntervalMs=15ms
+        // keeps renewing the lease every 15ms so it never expires.
+        const execution = await daemon.runWorkerIteration(
+          "worker-heartbeat-alive",
+          60,
+          0,
+          undefined,
+          15
+        );
+
+        assert.ok(execution);
+        assert.equal(execution.status, "success");
+        assert.equal(execution.delivery.status, "completed");
+        assert.equal(execution.emittedEvents.length, 1);
+      } finally {
+        await daemon.stop();
+      }
+    }
+  );
+});
+
+test("heartbeat kills in-flight process when lease is externally reclaimed", async () => {
+  await withTempRepo(
+    `version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+
+agents:
+  - id: long_coder
+    runtime: open-code
+    command: ["${process.execPath}", "${successAdapterPath}"]
+
+subscriptions:
+  - agentId: long_coder
+    topic: implementation_ready
+
+approvalGates: []
+artifactConventions: []
+`,
+    async (configPath, repositoryRoot) => {
+      // Disable automatic recovery — we control reclaim timing manually
+      const daemon = await startDaemon({
+        configPath,
+        repositoryRoot,
+        registerSignalHandlers: false,
+        recoveryIntervalMs: 10_000
+      });
+
+      try {
+        daemon.publish(
+          parseEventEnvelope({
+            eventId: "550e8400-e29b-41d4-a716-446655440314",
+            topic: "implementation_ready",
+            runId: "run-heartbeat-kill-001",
+            correlationId: "run-heartbeat-kill-001",
+            dedupeKey: "implementation_ready:run-heartbeat-kill-001",
+            occurredAt: "2026-03-10T11:05:00Z",
+            producer: { agentId: "planner_codex", runtime: "codex" },
+            // Agent sleeps long enough that we can reclaim the lease mid-execution
+            payload: { delayMs: 2_000 },
+            payloadMetadata: {},
+            artifactRefs: []
+          })
+        );
+
+        // Start iteration: 5s lease (won't expire naturally), heartbeat every 50ms
+        const iterationPromise = daemon.runWorkerIteration(
+          "worker-heartbeat-kill",
+          5_000,
+          0,
+          undefined,
+          50
+        );
+
+        // Wait for the agent process to start and the first heartbeat to succeed
+        await sleep(150);
+
+        // Force-expire the lease by writing a past timestamp via a second DB connection,
+        // then let the recovery scan transition the delivery to retry_scheduled.
+        const secondDb = openSqliteDatabase({ databasePath: daemon.databasePath });
+
+        try {
+          secondDb
+            .prepare("UPDATE deliveries SET lease_expires_at = ? WHERE status = 'leased'")
+            .run("2000-01-01T00:00:00.000Z");
+        } finally {
+          secondDb.close();
+        }
+
+        daemon.runRecoveryScan();
+
+        // The next heartbeat (within 50ms) detects extendLease returning false,
+        // sends SIGTERM to the agent process, and runWorkerIteration resolves.
+        const execution = await iterationPromise;
+
+        assert.ok(execution);
+        assert.equal(execution.status, "process_error");
+        assert.ok(
+          execution.delivery.status === "retry_scheduled" ||
+            execution.delivery.status === "ready"
+        );
+        // No follow-up events should have been emitted
+        assert.equal(execution.emittedEvents.length, 0);
+      } finally {
+        await daemon.stop();
+      }
+    }
+  );
+});

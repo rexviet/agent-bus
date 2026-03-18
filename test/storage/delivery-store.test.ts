@@ -361,3 +361,200 @@ test("delivery store lists run-scoped deliveries and failure views with event me
     }
   });
 });
+
+test("extendLeaseDelivery bumps lease expiry and returns true for a valid leased delivery", async () => {
+  await withTempDatabase(async (databasePath) => {
+    const database = openSqliteDatabase({ databasePath });
+
+    try {
+      await migrateDatabase(database);
+
+      const runStore = createRunStore(database);
+      const eventStore = createEventStore(database);
+      const deliveryStore = createDeliveryStore(database);
+
+      runStore.createRun({ runId: "run-extend-001", status: "active" });
+
+      const persistedEvent = eventStore.insertEvent({
+        envelope: parseEventEnvelope({
+          eventId: "550e8400-e29b-41d4-a716-446655440106",
+          topic: "implementation_ready",
+          runId: "run-extend-001",
+          correlationId: "run-extend-001",
+          dedupeKey: "implementation_ready:run-extend-001",
+          occurredAt: "2026-03-10T10:00:00Z",
+          producer: { agentId: "planner_codex", runtime: "codex" },
+          payload: {},
+          payloadMetadata: {},
+          artifactRefs: []
+        })
+      });
+
+      deliveryStore.planDeliveries({
+        eventId: persistedEvent.eventId,
+        topic: persistedEvent.topic,
+        agentIds: ["coder_open_code"],
+        status: "ready",
+        availableAt: persistedEvent.createdAt
+      });
+
+      const claimed = deliveryStore.claimNextDelivery({
+        workerId: "worker-extend-001",
+        leaseDurationMs: 60_000,
+        asOf: minutesAfter(persistedEvent.createdAt, 1)
+      });
+
+      assert.ok(claimed);
+      assert.ok(claimed.leaseToken);
+      assert.ok(claimed.leaseExpiresAt);
+
+      const originalExpiry = claimed.leaseExpiresAt as string;
+      const newExpiry = minutesAfter(originalExpiry, 5);
+
+      const renewed = deliveryStore.extendLeaseDelivery({
+        deliveryId: claimed.deliveryId,
+        leaseToken: claimed.leaseToken as string,
+        newExpiresAt: newExpiry
+      });
+
+      assert.equal(renewed, true);
+
+      const updated = deliveryStore.getDelivery(claimed.deliveryId);
+      assert.ok(updated);
+      assert.equal(updated.leaseExpiresAt, newExpiry);
+      assert.equal(updated.status, "leased");
+      assert.equal(updated.leaseToken, claimed.leaseToken);
+      assert.equal(updated.leaseOwner, claimed.leaseOwner);
+    } finally {
+      database.close();
+    }
+  });
+});
+
+test("extendLeaseDelivery returns false when lease token does not match", async () => {
+  await withTempDatabase(async (databasePath) => {
+    const database = openSqliteDatabase({ databasePath });
+
+    try {
+      await migrateDatabase(database);
+
+      const runStore = createRunStore(database);
+      const eventStore = createEventStore(database);
+      const deliveryStore = createDeliveryStore(database);
+
+      runStore.createRun({ runId: "run-extend-002", status: "active" });
+
+      const persistedEvent = eventStore.insertEvent({
+        envelope: parseEventEnvelope({
+          eventId: "550e8400-e29b-41d4-a716-446655440107",
+          topic: "implementation_ready",
+          runId: "run-extend-002",
+          correlationId: "run-extend-002",
+          dedupeKey: "implementation_ready:run-extend-002",
+          occurredAt: "2026-03-10T10:05:00Z",
+          producer: { agentId: "planner_codex", runtime: "codex" },
+          payload: {},
+          payloadMetadata: {},
+          artifactRefs: []
+        })
+      });
+
+      deliveryStore.planDeliveries({
+        eventId: persistedEvent.eventId,
+        topic: persistedEvent.topic,
+        agentIds: ["coder_open_code"],
+        status: "ready",
+        availableAt: persistedEvent.createdAt
+      });
+
+      const claimed = deliveryStore.claimNextDelivery({
+        workerId: "worker-extend-002",
+        leaseDurationMs: 60_000,
+        asOf: minutesAfter(persistedEvent.createdAt, 1)
+      });
+
+      assert.ok(claimed);
+
+      const renewed = deliveryStore.extendLeaseDelivery({
+        deliveryId: claimed.deliveryId,
+        leaseToken: "00000000-0000-0000-0000-000000000000",
+        newExpiresAt: minutesAfter(claimed.leaseExpiresAt as string, 5)
+      });
+
+      assert.equal(renewed, false);
+
+      // Lease expiry must be unchanged
+      const unchanged = deliveryStore.getDelivery(claimed.deliveryId);
+      assert.equal(unchanged?.leaseExpiresAt, claimed.leaseExpiresAt);
+      assert.equal(unchanged?.status, "leased");
+    } finally {
+      database.close();
+    }
+  });
+});
+
+test("extendLeaseDelivery returns false when delivery is not in leased state", async () => {
+  await withTempDatabase(async (databasePath) => {
+    const database = openSqliteDatabase({ databasePath });
+
+    try {
+      await migrateDatabase(database);
+
+      const runStore = createRunStore(database);
+      const eventStore = createEventStore(database);
+      const deliveryStore = createDeliveryStore(database);
+
+      runStore.createRun({ runId: "run-extend-003", status: "active" });
+
+      const persistedEvent = eventStore.insertEvent({
+        envelope: parseEventEnvelope({
+          eventId: "550e8400-e29b-41d4-a716-446655440108",
+          topic: "implementation_ready",
+          runId: "run-extend-003",
+          correlationId: "run-extend-003",
+          dedupeKey: "implementation_ready:run-extend-003",
+          occurredAt: "2026-03-10T10:10:00Z",
+          producer: { agentId: "planner_codex", runtime: "codex" },
+          payload: {},
+          payloadMetadata: {},
+          artifactRefs: []
+        })
+      });
+
+      deliveryStore.planDeliveries({
+        eventId: persistedEvent.eventId,
+        topic: persistedEvent.topic,
+        agentIds: ["coder_open_code"],
+        status: "ready",
+        availableAt: persistedEvent.createdAt
+      });
+
+      const claimed = deliveryStore.claimNextDelivery({
+        workerId: "worker-extend-003",
+        leaseDurationMs: 60_000,
+        asOf: minutesAfter(persistedEvent.createdAt, 1)
+      });
+
+      assert.ok(claimed);
+
+      // Acknowledge the delivery to move it out of leased state
+      deliveryStore.acknowledgeDelivery({
+        deliveryId: claimed.deliveryId,
+        leaseToken: claimed.leaseToken as string
+      });
+
+      assert.equal(deliveryStore.getDelivery(claimed.deliveryId)?.status, "completed");
+
+      // extendLease on a completed delivery must fail
+      const renewed = deliveryStore.extendLeaseDelivery({
+        deliveryId: claimed.deliveryId,
+        leaseToken: claimed.leaseToken as string,
+        newExpiresAt: minutesAfter(new Date().toISOString(), 5)
+      });
+
+      assert.equal(renewed, false);
+    } finally {
+      database.close();
+    }
+  });
+});
