@@ -15,6 +15,7 @@ import {
   type ProcessMonitorCallbacks
 } from "../adapters/process-runner.js";
 import type { AgentBusManifest } from "../config/manifest-schema.js";
+import type { SchemaRegistry } from "../config/schema-registry.js";
 import type { RuntimeLayout } from "../shared/runtime-layout.js";
 import type { PersistedDeliveryRecord } from "../storage/delivery-store.js";
 import type { PersistedEventRecord } from "../storage/event-store.js";
@@ -78,6 +79,7 @@ export interface AdapterWorkerExecutionResult {
 export interface AdapterWorkerOptions {
   readonly database: DatabaseSync;
   readonly manifest: AgentBusManifest;
+  readonly schemaRegistry: SchemaRegistry;
   readonly layout: RuntimeLayout;
   readonly runStore: ReturnTypeOfCreateRunStore;
   readonly eventStore: ReturnTypeOfCreateEventStore;
@@ -308,10 +310,36 @@ function finalizeLeaseBoundTransition(
   }
 }
 
+function mapExternallyFinalizedDeliveryStatus(
+  delivery: PersistedDeliveryRecord
+): AdapterWorkerExecutionResult["status"] | null {
+  const leaseExpiryError =
+    delivery.lastError?.includes("Lease expired") === true ||
+    delivery.deadLetterReason?.includes("Lease expired") === true;
+
+  switch (delivery.status) {
+    case "completed":
+      return "success";
+    case "retry_scheduled":
+      return leaseExpiryError ? null : "retryable_error";
+    case "dead_letter":
+      return leaseExpiryError ? null : "fatal_error";
+    default:
+      return null;
+  }
+}
+
 function publishEmittedEventsAndAcknowledge(
   options: Pick<
     AdapterWorkerOptions,
-    "database" | "manifest" | "runStore" | "eventStore" | "deliveryStore" | "dispatcher"
+    | "database"
+    | "manifest"
+    | "schemaRegistry"
+    | "runStore"
+    | "eventStore"
+    | "deliveryStore"
+    | "dispatcher"
+    | "logger"
   > & {
     readonly deliveryId: string;
     readonly leaseToken: string;
@@ -346,10 +374,12 @@ function publishEmittedEventsAndAcknowledge(
         {
           database: options.database,
           manifest: options.manifest,
+          schemaRegistry: options.schemaRegistry,
           runStore: options.runStore,
           eventStore: options.eventStore,
           deliveryStore: options.deliveryStore,
-          envelope
+          envelope,
+          ...(options.logger ? { logger: options.logger } : {})
         },
         { skipTransaction: true }
       );
@@ -556,6 +586,43 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
           monitor: trackingMonitor
         });
 
+        const externallyFinalizedDelivery = currentDeliveryLostLease(
+          options.deliveryStore,
+          claimedDelivery.deliveryId,
+          leaseToken
+        );
+        const externallyFinalizedStatus = externallyFinalizedDelivery
+          ? mapExternallyFinalizedDeliveryStatus(externallyFinalizedDelivery)
+          : null;
+
+        if (externallyFinalizedDelivery && externallyFinalizedStatus) {
+          if (externallyFinalizedDelivery.status === "completed") {
+            deliveryLogger?.info({ event: "delivery.completed" });
+          } else if (externallyFinalizedDelivery.status === "retry_scheduled") {
+            deliveryLogger?.info({
+              event: "delivery.retry_scheduled",
+              errorMessage: externallyFinalizedDelivery.lastError
+            });
+          } else if (externallyFinalizedDelivery.status === "dead_letter") {
+            deliveryLogger?.error({
+              event: "delivery.dead_lettered",
+              errorMessage:
+                externallyFinalizedDelivery.deadLetterReason ??
+                externallyFinalizedDelivery.lastError
+            });
+          }
+
+          return buildWorkerExecutionResult(
+            externallyFinalizedStatus,
+            externallyFinalizedDelivery,
+            {
+              workPackagePath: processResult.workPackagePath,
+              resultFilePath: processResult.resultFilePath,
+              logFilePath: processResult.logFilePath
+            }
+          );
+        }
+
         if (!processResult.result) {
           const errorMessage =
             processResult.exitCode === 0 && processResult.signal === null
@@ -669,6 +736,7 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
           {
             database: options.database,
             manifest: options.manifest,
+            schemaRegistry: options.schemaRegistry,
             runStore: options.runStore,
             eventStore: options.eventStore,
             deliveryStore: options.deliveryStore,
@@ -681,7 +749,8 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
               agentId: agent.id,
               runtime: agent.runtime
             },
-            defaultArtifactRefs: adapterResult.outputArtifacts
+            defaultArtifactRefs: adapterResult.outputArtifacts,
+            ...(deliveryLogger ? { logger: deliveryLogger } : {})
           },
           {
             workPackagePath: processResult.workPackagePath,

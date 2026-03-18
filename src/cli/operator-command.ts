@@ -2,6 +2,7 @@ import * as path from "node:path";
 
 import type { AgentBusDaemon } from "../daemon/index.js";
 import { startDaemon } from "../daemon/index.js";
+import { EventSchemaValidationError } from "../domain/schema-error.js";
 import { loadEventEnvelopeFromFile } from "./load-envelope.js";
 import {
   writeApprovalDecisionText,
@@ -362,6 +363,11 @@ async function runPublishCommand(
 
       return 0;
     } catch (error) {
+      if (error instanceof EventSchemaValidationError) {
+        writeError(io.stderr, error.message);
+        return 1;
+      }
+
       writeError(io.stderr, error instanceof Error ? error.message : "Publish failed.");
       return 1;
     }

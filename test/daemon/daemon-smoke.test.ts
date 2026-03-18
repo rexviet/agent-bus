@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import { parseEventEnvelope } from "../../src/domain/event-envelope.js";
 import { startDaemon } from "../../src/daemon/index.js";
+import { EventSchemaValidationError } from "../../src/domain/schema-error.js";
 
 async function withTempRepo(
   callback: (tempRepoPath: string) => Promise<void>
@@ -206,6 +207,106 @@ artifactConventions: []
       assert.equal(secondDaemon.dispatcherSnapshot().length, 1);
     } finally {
       await secondDaemon.stop();
+    }
+  });
+});
+
+test("startDaemon registerSchema supports programmatic schema validation", async () => {
+  await withTempRepo(async (tempRepoPath) => {
+    await writeManifest(
+      tempRepoPath,
+      `version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+
+agents:
+  - id: tech_lead_claude
+    runtime: claude-code
+    command: [claude, run]
+
+subscriptions:
+  - agentId: tech_lead_claude
+    topic: plan_done
+
+approvalGates: []
+artifactConventions: []
+`
+    );
+
+    const daemon = await startDaemon({
+      configPath: path.join(tempRepoPath, "agent-bus.yaml"),
+      repositoryRoot: tempRepoPath,
+      registerSignalHandlers: false,
+      recoveryIntervalMs: 5_000
+    });
+
+    try {
+      daemon.registerSchema("plan_done", {
+        enforcement: "reject",
+        schema: {
+          type: "object",
+          properties: {
+            sequence: {
+              type: "integer"
+            }
+          },
+          required: ["sequence"],
+          additionalProperties: false
+        }
+      });
+
+      assert.throws(
+        () =>
+          daemon.publish(
+            parseEventEnvelope({
+              eventId: "550e8400-e29b-41d4-a716-446655440006",
+              topic: "plan_done",
+              runId: "run-smoke-schema-001",
+              correlationId: "run-smoke-schema-001",
+              dedupeKey: "plan_done:run-smoke-schema-001",
+              occurredAt: "2026-03-09T15:40:00Z",
+              producer: {
+                agentId: "ba_codex",
+                runtime: "codex"
+              },
+              payload: {
+                sequence: "invalid"
+              },
+              payloadMetadata: {},
+              artifactRefs: []
+            })
+          ),
+        (error: unknown) =>
+          error instanceof EventSchemaValidationError &&
+          error.code === "SCHEMA_VALIDATION_FAILED"
+      );
+
+      const acceptedEvent = daemon.publish(
+        parseEventEnvelope({
+          eventId: "550e8400-e29b-41d4-a716-446655440007",
+          topic: "plan_done",
+          runId: "run-smoke-schema-002",
+          correlationId: "run-smoke-schema-002",
+          dedupeKey: "plan_done:run-smoke-schema-002",
+          occurredAt: "2026-03-09T15:41:00Z",
+          producer: {
+            agentId: "ba_codex",
+            runtime: "codex"
+          },
+          payload: {
+            sequence: 1
+          },
+          payloadMetadata: {},
+          artifactRefs: []
+        })
+      );
+
+      assert.equal(acceptedEvent.eventId, "550e8400-e29b-41d4-a716-446655440007");
+      assert.equal(daemon.listDeliveriesForEvent(acceptedEvent.eventId).length, 1);
+    } finally {
+      await daemon.stop();
     }
   });
 });

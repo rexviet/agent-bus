@@ -886,9 +886,11 @@ test("adapter worker logs lease conflicts at warn level and returns null", async
       },
       agents: [],
       subscriptions: [],
+      schemas: {},
       approvalGates: [],
       artifactConventions: []
     },
+    schemaRegistry: {} as never,
     layout: {
       repositoryRoot: process.cwd(),
       workspaceDir: process.cwd(),

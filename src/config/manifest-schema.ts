@@ -46,6 +46,11 @@ const ApprovalGateSchema = z.object({
   onReject: z.enum(["return_to_producer", "cancel_run"])
 });
 
+const SchemaDeclarationSchema = z.object({
+  enforcement: z.enum(["warn", "reject"]).default("warn"),
+  schema: z.unknown()
+});
+
 const AgentSchema = z.object({
   id: AgentIdSchema,
   runtime: z.string().min(1),
@@ -66,6 +71,7 @@ export const AgentBusManifestSchema = z.object({
   }),
   agents: z.array(AgentSchema).min(1),
   subscriptions: z.array(SubscriptionSchema).min(1),
+  schemas: z.record(TopicSchema, SchemaDeclarationSchema).default({}),
   approvalGates: z.array(ApprovalGateSchema).default([]),
   artifactConventions: z.array(ArtifactConventionSchema).default([])
 });

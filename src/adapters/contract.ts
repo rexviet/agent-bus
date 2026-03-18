@@ -115,15 +115,36 @@ export const SuccessfulAdapterResultSchema = z.object({
   events: z.array(EmittedEventDraftSchema).default([])
 });
 
-export const RetryableAdapterResultSchema = z.object({
-  schemaVersion: z.literal(1),
-  status: z.literal("retryable_error"),
-  errorMessage: z.string().min(1),
-  retryDelayMs: z.number().int().nonnegative(),
-  summary: z.string().min(1).optional(),
-  outputArtifacts: z.array(ArtifactRefSchema).default([]),
-  events: z.array(EmittedEventDraftSchema).default([])
-});
+export const RetryableAdapterResultSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    status: z.literal("retryable_error"),
+    errorMessage: z.string().min(1),
+    retryDelayMs: z.number().int().nonnegative().optional(),
+    // Backward-compat alias used by some adapters/agents.
+    retryAfterMs: z.number().int().nonnegative().optional(),
+    summary: z.string().min(1).optional(),
+    outputArtifacts: z.array(ArtifactRefSchema).default([]),
+    events: z.array(EmittedEventDraftSchema).default([])
+  })
+  .superRefine((value, ctx) => {
+    if (value.retryDelayMs === undefined && value.retryAfterMs === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["retryDelayMs"],
+        message:
+          "retryDelayMs is required (retryAfterMs is accepted as a deprecated alias)."
+      });
+    }
+  })
+  .transform((value) => {
+    const retryDelayMs = value.retryDelayMs ?? value.retryAfterMs!;
+    const { retryAfterMs: _retryAfterMs, ...rest } = value;
+    return {
+      ...rest,
+      retryDelayMs
+    };
+  });
 
 export const FatalAdapterResultSchema = z.object({
   schemaVersion: z.literal(1),

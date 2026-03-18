@@ -39,6 +39,48 @@ test("buildCodexCommand includes identity file in prompt when provided", () => {
   assert.ok(command.args.at(-1)?.includes(".agent/identities/developer.md"));
 });
 
+test("buildCodexCommand injects agent_bus MCP config when mcpUrl is provided", () => {
+  const command = buildCodexCommand({
+    executable: "codex",
+    existingArgs: [],
+    workingDirectory: "/repo",
+    workPackagePath: "/repo/work-package.json",
+    resultFilePath: "/repo/result.json",
+    logFilePath: "/repo/run.log",
+    mcpUrl: "http://127.0.0.1:43111/mcp",
+    baseEnvironment: {}
+  });
+
+  assert.ok(
+    command.args.includes('-c') &&
+      command.args.includes('mcp_servers.agent_bus.url="http://127.0.0.1:43111/mcp"')
+  );
+  assert.ok(command.args.includes("mcp_servers.agent_bus.enabled=true"));
+});
+
+test("buildCodexCommand does not duplicate agent_bus MCP config when already provided", () => {
+  const command = buildCodexCommand({
+    executable: "codex",
+    existingArgs: [
+      "-c",
+      'mcp_servers.agent_bus.url="http://127.0.0.1:9/mcp"',
+      "-c",
+      "mcp_servers.agent_bus.enabled=true"
+    ],
+    workingDirectory: "/repo",
+    workPackagePath: "/repo/work-package.json",
+    resultFilePath: "/repo/result.json",
+    logFilePath: "/repo/run.log",
+    mcpUrl: "http://127.0.0.1:43111/mcp",
+    baseEnvironment: {}
+  });
+
+  const agentBusConfigCount = command.args.filter((arg) =>
+    arg.startsWith("mcp_servers.agent_bus.")
+  ).length;
+  assert.equal(agentBusConfigCount, 2);
+});
+
 test("buildCodexCommand rejects non-codex executables", () => {
   assert.throws(
     () =>

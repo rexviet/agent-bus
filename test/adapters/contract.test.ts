@@ -162,6 +162,18 @@ test("parseAdapterResultEnvelope accepts emitted events and output artifacts", (
   assert.equal(result.events[0]?.topic, "system_design_done");
 });
 
+test("parseAdapterResultEnvelope accepts retryAfterMs as a retryDelayMs alias", () => {
+  const result = parseAdapterResultEnvelope({
+    schemaVersion: 1,
+    status: "retryable_error",
+    errorMessage: "Temporary issue.",
+    retryAfterMs: 60_000
+  });
+
+  assert.equal(result.status, "retryable_error");
+  assert.equal(result.retryDelayMs, 60_000);
+});
+
 test("runtime registry exposes stable runtime identities and executable aliases", () => {
   assert.equal(assertSupportedRuntimeFamily("codex").displayName, "Codex");
   assert.equal(getRuntimeDefinition("open-code")?.executableCandidates[0], "opencode");

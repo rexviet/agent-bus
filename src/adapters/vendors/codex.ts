@@ -9,6 +9,7 @@ export interface VendorAdapterCommandInput {
   readonly workPackagePath: string;
   readonly resultFilePath: string;
   readonly logFilePath: string;
+  readonly mcpUrl?: string;
   readonly baseEnvironment: Readonly<Record<string, string>>;
   readonly identityFilePath?: string;
 }
@@ -49,6 +50,25 @@ export function buildCodexCommand(
       "--output-last-message",
       path.join(path.dirname(input.resultFilePath), "codex-last-message.txt")
     );
+  }
+
+  // Ensure the per-run Agent Bus MCP endpoint is available to this Codex worker.
+  // This allows agents to call `publish_event` directly during execution.
+  if (input.mcpUrl) {
+    const hasAgentBusConfig = args.some(
+      (arg, index) =>
+        (arg === "-c" || arg === "--config") &&
+        (args[index + 1]?.startsWith("mcp_servers.agent_bus.") ?? false)
+    );
+
+    if (!hasAgentBusConfig) {
+      args.push(
+        "-c",
+        `mcp_servers.agent_bus.url=${JSON.stringify(input.mcpUrl)}`,
+        "-c",
+        "mcp_servers.agent_bus.enabled=true"
+      );
+    }
   }
 
   args.push(buildCodexPrompt(input));

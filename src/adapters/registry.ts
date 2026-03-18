@@ -162,6 +162,7 @@ export function buildAdapterCommand(
     workPackagePath: input.workPackagePath,
     resultFilePath: input.resultFilePath,
     logFilePath: input.logFilePath,
+    ...(input.mcpUrl ? { mcpUrl: input.mcpUrl } : {}),
     baseEnvironment: buildBaseEnvironment(input),
     ...(input.agent.identityFile
       ? { identityFilePath: path.resolve(input.workingDirectory, input.agent.identityFile) }

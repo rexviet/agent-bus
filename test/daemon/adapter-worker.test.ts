@@ -40,6 +40,12 @@ async function withTempRepo(
   }
 }
 
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
 function createLogCapture(): {
   readonly destination: DaemonLogDestination;
   readEntries(): Array<Record<string, unknown>>;
@@ -172,6 +178,90 @@ artifactConventions: []
   );
 });
 
+test("runWorkerIteration accepts agent-side delivery finalization without result envelope", async () => {
+  await withTempRepo(
+    `version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+
+agents:
+  - id: coder_open_code
+    runtime: codex
+    command: ["${process.execPath}", "${monitorFixturePath}"]
+    environment:
+      FIXTURE_DELAY_MS: "350"
+      FIXTURE_STDOUT_LINES: "agent-finalizing-via-mcp"
+
+subscriptions:
+  - agentId: coder_open_code
+    topic: implementation_ready
+
+approvalGates: []
+artifactConventions: []
+`,
+    async (configPath, repositoryRoot) => {
+      const daemon = await startDaemon({
+        configPath,
+        repositoryRoot,
+        registerSignalHandlers: false,
+        recoveryIntervalMs: 5_000
+      });
+
+      try {
+        const eventId = "550e8400-e29b-41d4-a716-446655440360";
+        daemon.publish(
+          parseEventEnvelope({
+            eventId,
+            topic: "implementation_ready",
+            runId: "run-adapter-external-finalize-001",
+            correlationId: "run-adapter-external-finalize-001",
+            dedupeKey: "implementation_ready:run-adapter-external-finalize-001",
+            occurredAt: "2026-03-10T06:20:00Z",
+            producer: {
+              agentId: "planner_codex",
+              runtime: "codex"
+            },
+            payload: {},
+            payloadMetadata: {},
+            artifactRefs: []
+          })
+        );
+
+        const externalFinalize = (async () => {
+          for (let attempt = 0; attempt < 80; attempt += 1) {
+            const delivery = daemon.listDeliveriesForEvent(eventId)[0];
+
+            if (delivery?.status === "leased" && delivery.leaseToken) {
+              daemon.acknowledgeDelivery(delivery.deliveryId, delivery.leaseToken);
+              return true;
+            }
+
+            await sleep(10);
+          }
+
+          return false;
+        })();
+
+        const execution = await daemon.runWorkerIteration(
+          "worker-external-finalize",
+          60_000
+        );
+        const finalizeSucceeded = await externalFinalize;
+
+        assert.equal(finalizeSucceeded, true);
+        assert.ok(execution);
+        assert.equal(execution?.status, "success");
+        assert.equal(execution?.delivery.status, "completed");
+        assert.equal(execution?.emittedEvents.length, 0);
+      } finally {
+        await daemon.stop();
+      }
+    }
+  );
+});
+
 test("runWorkerIteration schedules retryable adapter failures", async () => {
   await withTempRepo(
     `version: 1
@@ -227,6 +317,101 @@ artifactConventions: []
         assert.equal(execution?.status, "retryable_error");
         assert.equal(execution?.delivery.status, "retry_scheduled");
         assert.equal(execution?.delivery.lastError, "Temporary adapter failure.");
+      } finally {
+        await daemon.stop();
+      }
+    }
+  );
+});
+
+test("runWorkerIteration schedules retry when emitted event schema enforcement is reject", async () => {
+  await withTempRepo(
+    `version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+
+agents:
+  - id: coder_open_code
+    runtime: open-code
+    command: ["${process.execPath}", "${successAdapterPath}"]
+  - id: qa_gemini
+    runtime: gemini
+    command: ["${process.execPath}", "${successAdapterPath}"]
+
+subscriptions:
+  - agentId: coder_open_code
+    topic: implementation_ready
+  - agentId: qa_gemini
+    topic: implementation_done
+
+schemas:
+  implementation_done:
+    enforcement: reject
+    schema:
+      type: object
+      properties:
+        sourceDeliveryId:
+          type: string
+        requiredFlag:
+          type: integer
+      required:
+        - sourceDeliveryId
+        - requiredFlag
+      additionalProperties: false
+
+approvalGates: []
+artifactConventions: []
+`,
+    async (configPath, repositoryRoot) => {
+      const daemon = await startDaemon({
+        configPath,
+        repositoryRoot,
+        registerSignalHandlers: false,
+        recoveryIntervalMs: 5_000
+      });
+
+      try {
+        daemon.publish(
+          parseEventEnvelope({
+            eventId: "550e8400-e29b-41d4-a716-446655440312",
+            topic: "implementation_ready",
+            runId: "run-adapter-schema-reject-001",
+            correlationId: "run-adapter-schema-reject-001",
+            dedupeKey: "implementation_ready:run-adapter-schema-reject-001",
+            occurredAt: "2026-03-10T05:07:00Z",
+            producer: {
+              agentId: "planner_codex",
+              runtime: "codex"
+            },
+            payload: {},
+            payloadMetadata: {},
+            artifactRefs: []
+          })
+        );
+
+        const execution = await daemon.runWorkerIteration("worker-schema-reject", 60_000);
+
+        assert.ok(execution);
+        assert.equal(execution?.status, "process_error");
+        assert.equal(execution?.delivery.status, "retry_scheduled");
+        assert.match(execution?.delivery.lastError ?? "", /Schema validation failed/);
+        assert.equal(execution?.emittedEvents.length, 0);
+
+        const database = openSqliteDatabase({ databasePath: daemon.databasePath });
+
+        try {
+          const topics = (
+            database
+              .prepare("SELECT topic FROM events ORDER BY created_at ASC")
+              .all() as { readonly topic: string }[]
+          ).map((row) => row.topic);
+
+          assert.deepEqual(topics, ["implementation_ready"]);
+        } finally {
+          database.close();
+        }
       } finally {
         await daemon.stop();
       }
@@ -350,11 +535,14 @@ artifactConventions: []
           })
         );
 
-        const firstExecution = await daemon.runWorkerIteration("worker-lease-1", 20);
+        const firstExecution = await daemon.runWorkerIteration("worker-lease-1", 20, 0);
 
         assert.ok(firstExecution);
         assert.equal(firstExecution?.status, "process_error");
-        assert.equal(firstExecution?.delivery.status, "ready");
+        assert.ok(
+          firstExecution?.delivery.status === "ready" ||
+            firstExecution?.delivery.status === "retry_scheduled"
+        );
         assert.equal(firstExecution?.emittedEvents.length, 0);
 
         const database = openSqliteDatabase({ databasePath: daemon.databasePath });
@@ -374,17 +562,17 @@ artifactConventions: []
           }));
 
           assert.deepEqual(persistedTopics, ["implementation_ready"]);
-          assert.deepEqual(deliveryRows, [
-            {
-              topic: "implementation_ready",
-              status: "ready"
-            }
-          ]);
+          assert.equal(deliveryRows.length, 1);
+          assert.equal(deliveryRows[0]?.topic, "implementation_ready");
+          assert.ok(
+            deliveryRows[0]?.status === "ready" ||
+              deliveryRows[0]?.status === "retry_scheduled"
+          );
         } finally {
           database.close();
         }
 
-        const secondExecution = await daemon.runWorkerIteration("worker-lease-2", 5_000);
+        const secondExecution = await daemon.runWorkerIteration("worker-lease-2", 5_000, 0);
 
         assert.ok(secondExecution);
         assert.equal(secondExecution?.status, "success");

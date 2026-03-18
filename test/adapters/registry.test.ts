@@ -25,6 +25,8 @@ test("buildAdapterCommand includes AGENT_BUS_MCP_URL when mcpUrl is provided", (
   const command = buildAdapterCommand(createInput("http://127.0.0.1:12345/mcp"));
 
   assert.equal(command.environment.AGENT_BUS_MCP_URL, "http://127.0.0.1:12345/mcp");
+  assert.ok(command.args.includes('mcp_servers.agent_bus.url="http://127.0.0.1:12345/mcp"'));
+  assert.ok(command.args.includes("mcp_servers.agent_bus.enabled=true"));
 });
 
 test("buildAdapterCommand omits AGENT_BUS_MCP_URL when mcpUrl is missing", () => {

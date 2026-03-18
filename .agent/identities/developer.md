@@ -6,10 +6,9 @@ You are the **Developer Agent** in the agent-bus dogfooding workflow.
 
 You receive a `plan_done` event after Claude Opus finishes planning a phase. Your job is to:
 1. Read all rules in .agents/rules
-2. Sync planning docs to the GSD execution workspace, commit, push changes and create PR
-3. Create new branch, execute the phase implementation
-4. Create a pull request
-5. Publish a `pr_ready` event so the reviewer can inspect the work
+2. Execute the phase implementation using the global Codex GSD skill
+3. Commit implementation changes locally (no push, no PR creation)
+4. Publish an `implement_done` event so the shipper can handle push/PR
 
 ## Step-by-Step Instructions
 
@@ -20,28 +19,25 @@ Read the JSON file at `$AGENT_BUS_WORK_PACKAGE_PATH`. Extract:
 - `event.payload.milestone` — the milestone version (e.g. `"v1.1"`)
 - `event.runId` — carry this forward for follow-up event correlation
 
-### 2. Sync Planning to GSD
+### 2. Execute the Phase via Global GSD Skill
 
-Run the sync script for the specific phase:
+Execute the phase using the globally installed Codex skill:
 
 ```bash
-node scripts/sync-planning-to-gsd.mjs --phase <phase>
+$gsd-execute <phase>
 ```
 
-Verify `.gsd/phases/<phase>/` directory exists and has PLAN.md files before continuing.
+If your environment uses the full skill name instead of an alias, use:
 
-### 3. Execute the Phase
+```bash
+$gsd-execute-phase <phase>
+```
 
-Follow the instructions in `.agent/workflows/execute.md` with argument `<phase>`:
-- Read `.gsd/ROADMAP.md` and `.gsd/STATE.md` for context
-- Execute all plans in the phase directory wave by wave
-- Each plan gets a fresh execution context
-- Verify results after each wave before proceeding
-- After all waves complete, update `.gsd/STATE.md`
+Do **not** call `.agent/workflows/execute.md` directly.
 
-### 4. Commit the implementation
+### 3. Commit the implementation
 
-Once implementation is complete and tests pass, stage and commit all changes:
+Once implementation is complete and tests pass, ensure changes are committed locally:
 
 ```bash
 git add -A
@@ -50,42 +46,57 @@ git commit -m "feat(phase-<phase>): implement phase <phase>"
 
 Do NOT push or create a PR — that is handled by the shipper agent.
 
-### 5. Write Success Result
+### 4. Create `implement_done` Envelope In `/envelopes`
 
-Write a success result to `$AGENT_BUS_RESULT_FILE_PATH`. Include an `implement_done` event so the shipper picks up the work:
+Create an event envelope file under `envelopes/`, for example:
+
+`envelopes/implement-done.<runId>.json`
+
+Use `envelopes/envelope-template.json` as the base when available, then fill:
+- `eventId`: new UUID
+- `topic`: `implement_done`
+- `runId`: `event.runId`
+- `correlationId`: `event.correlationId`
+- `causationId`: `event.eventId`
+- `dedupeKey`: `implement_done:<event.eventId>:<AGENT_BUS_AGENT_ID>`
+- `occurredAt`: current ISO timestamp
+- `producer.agentId`: `AGENT_BUS_AGENT_ID`
+- `producer.runtime`: `AGENT_BUS_RUNTIME`
+- `payload.phase`: `<phase>`
+- `payload.milestone`: `<milestone>`
+- `payload.branch`: `<current-branch>`
+- `payload.prTitle`: `feat(phase-<phase>): <phase-name>`
+- `payload.prBody`: `Implements phase <phase> of milestone <milestone>.\n\nSee .planning/phases/<phase>/ for execution details.`
+- `payload.baseBranch`: `main`
+- `artifactRefs`: `[]`
+
+### 5. Publish Event (MCP Preferred, CLI Fallback)
+
+Publish `envelopes/implement-done.<runId>.json`:
+- Preferred: Agent Bus MCP tool `publish_event`
+- Fallback: `agent-bus publish --envelope envelopes/implement-done.<runId>.json`
+
+If `publish_event` returns a duplicate-dedupe error (for example `UNIQUE constraint failed: events.dedupe_key`), treat it as already published and continue.
+
+### 6. Write Success Result
+
+After successful MCP publish, write success result to `$AGENT_BUS_RESULT_FILE_PATH` with empty `events`.
 
 ```json
 {
   "schemaVersion": 1,
   "status": "success",
-  "summary": "Phase <phase> implemented and committed.",
+  "summary": "Phase <phase> implemented, committed, envelope created in /envelopes, and implement_done published via MCP.",
   "outputArtifacts": [],
-  "events": [
-    {
-      "topic": "implement_done",
-      "payload": {
-        "phase": <phase>,
-        "milestone": "<milestone>",
-        "branch": "<current-branch>",
-        "prTitle": "feat(phase-<phase>): <phase-name>",
-        "prBody": "Implements phase <phase> of milestone <milestone>.\n\nSee .gsd/phases/<phase>/ for execution details.",
-        "baseBranch": "main"
-      }
-    }
-  ]
+  "events": []
 }
 ```
 
 ## Error Handling
 
 If any step fails:
-- Write a `retryable_error` result for transient failures (network, git conflicts)
-- Write a `fatal_error` result for permanent failures (missing plan files, compilation errors)
-
-```json
-{
-  "status": "retryable_error",
-  "errorMessage": "<describe what failed and why>",
-  "retryAfterMs": 60000
-}
-```
+- Call MCP tool `report_delivery_error` with current `deliveryId` + `leaseToken`.
+  - Transient failures: `status: retryable_error` with `errorMessage` + `retryDelayMs`
+  - Permanent failures: `status: fatal_error` with `errorMessage`
+- MCP publish failures (`publish_event` unavailable/timeout/connection failure) are `retryable_error`.
+- After `report_delivery_error` succeeds, exit immediately. Do not emit success events and do not write any result envelope JSON.

@@ -7,6 +7,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 import { createMcpServer } from "../../src/daemon/mcp-server.js";
+import { EventSchemaValidationError } from "../../src/domain/schema-error.js";
 
 function buildValidEnvelope(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -23,6 +24,21 @@ function buildValidEnvelope(overrides: Record<string, unknown> = {}): Record<str
     payload: { answer: 42 },
     payloadMetadata: {},
     artifactRefs: [],
+    ...overrides
+  };
+}
+
+function createServerOptions(
+  overrides: Partial<Parameters<typeof createMcpServer>[0]> = {}
+): Parameters<typeof createMcpServer>[0] {
+  return {
+    publishEvent: () => {
+      // no-op
+    },
+    reportDeliveryError: () => ({
+      deliveryId: "delivery:default",
+      status: "retry_scheduled"
+    }),
     ...overrides
   };
 }
@@ -81,11 +97,7 @@ async function findOpenPort(): Promise<number> {
 }
 
 test("createMcpServer starts on localhost and exposes /mcp URL", async () => {
-  const server = await createMcpServer({
-    publishEvent: () => {
-      // no-op
-    }
-  });
+  const server = await createMcpServer(createServerOptions());
 
   await server.stop();
 
@@ -93,11 +105,7 @@ test("createMcpServer starts on localhost and exposes /mcp URL", async () => {
 });
 
 test("stop closes the HTTP server", async () => {
-  const server = await createMcpServer({
-    publishEvent: () => {
-      // no-op
-    }
-  });
+  const server = await createMcpServer(createServerOptions());
 
   const url = server.url;
   await server.stop();
@@ -107,11 +115,13 @@ test("stop closes the HTTP server", async () => {
 
 test("publish_event calls callback and returns ok on valid envelope", async () => {
   let capturedRunId: string | undefined;
-  const server = await createMcpServer({
-    publishEvent: (envelope) => {
-      capturedRunId = envelope.runId;
-    }
-  });
+  const server = await createMcpServer(
+    createServerOptions({
+      publishEvent: (envelope) => {
+        capturedRunId = envelope.runId;
+      }
+    })
+  );
 
   try {
     const result = await withMcpClient(server.url, (client) =>
@@ -137,11 +147,7 @@ test("publish_event calls callback and returns ok on valid envelope", async () =
 });
 
 test("publish_event returns isError on invalid envelope", async () => {
-  const server = await createMcpServer({
-    publishEvent: () => {
-      // no-op
-    }
-  });
+  const server = await createMcpServer(createServerOptions());
 
   try {
     const invalidArgs = {
@@ -168,11 +174,13 @@ test("publish_event returns isError on invalid envelope", async () => {
 });
 
 test("publish_event catches callback errors and returns isError", async () => {
-  const server = await createMcpServer({
-    publishEvent: () => {
-      throw new Error("boom");
-    }
-  });
+  const server = await createMcpServer(
+    createServerOptions({
+      publishEvent: () => {
+        throw new Error("boom");
+      }
+    })
+  );
 
   try {
     const result = await withMcpClient(server.url, (client) =>
@@ -194,14 +202,38 @@ test("publish_event catches callback errors and returns isError", async () => {
   }
 });
 
+test("publish_event surfaces EventSchemaValidationError as MCP tool error response", async () => {
+  const server = await createMcpServer(
+    createServerOptions({
+      publishEvent: () => {
+        throw new EventSchemaValidationError("plan_done", "'/sequence' must be integer");
+      }
+    })
+  );
+
+  try {
+    const result = await withMcpClient(server.url, (client) =>
+      client.callTool({
+        name: "publish_event",
+        arguments: buildValidEnvelope()
+      })
+    );
+    const payload = result as {
+      readonly isError?: boolean;
+      readonly content?: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
+    };
+
+    assert.equal(payload.isError, true);
+    assert.equal(payload.content?.[0]?.type, "text");
+    assert.match(payload.content?.[0]?.text ?? "", /Schema validation failed for topic plan_done/);
+  } finally {
+    await server.stop();
+  }
+});
+
 test("createMcpServer binds to explicit port when provided", async () => {
   const port = await findOpenPort();
-  const server = await createMcpServer({
-    port,
-    publishEvent: () => {
-      // no-op
-    }
-  });
+  const server = await createMcpServer(createServerOptions({ port }));
 
   try {
     assert.equal(server.url, `http://127.0.0.1:${port}/mcp`);
@@ -212,22 +244,12 @@ test("createMcpServer binds to explicit port when provided", async () => {
 
 test("createMcpServer rejects when requested port is already in use", async () => {
   const port = await findOpenPort();
-  const firstServer = await createMcpServer({
-    port,
-    publishEvent: () => {
-      // no-op
-    }
-  });
+  const firstServer = await createMcpServer(createServerOptions({ port }));
 
   try {
     await assert.rejects(
       () =>
-        createMcpServer({
-          port,
-          publishEvent: () => {
-            // no-op
-          }
-        }),
+        createMcpServer(createServerOptions({ port })),
       /EADDRINUSE/
     );
   } finally {
@@ -237,11 +259,13 @@ test("createMcpServer rejects when requested port is already in use", async () =
 
 test("multiple sequential MCP requests are handled successfully", async () => {
   const capturedRunIds: string[] = [];
-  const server = await createMcpServer({
-    publishEvent: (envelope) => {
-      capturedRunIds.push(envelope.runId);
-    }
-  });
+  const server = await createMcpServer(
+    createServerOptions({
+      publishEvent: (envelope) => {
+        capturedRunIds.push(envelope.runId);
+      }
+    })
+  );
 
   try {
     await withMcpClient(server.url, (client) =>
@@ -270,11 +294,13 @@ test("multiple sequential MCP requests are handled successfully", async () => {
 
 test("MCP server handles sustained sequential publish_event calls", async () => {
   let callCount = 0;
-  const server = await createMcpServer({
-    publishEvent: () => {
-      callCount += 1;
-    }
-  });
+  const server = await createMcpServer(
+    createServerOptions({
+      publishEvent: () => {
+        callCount += 1;
+      }
+    })
+  );
 
   try {
     for (let index = 0; index < 60; index += 1) {
@@ -292,6 +318,85 @@ test("MCP server handles sustained sequential publish_event calls", async () => 
     }
 
     assert.equal(callCount, 60);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("report_delivery_error calls callback and returns updated delivery status", async () => {
+  const captured: {
+    deliveryId?: string;
+    leaseToken?: string;
+    status?: string;
+    retryDelayMs?: number;
+  } = {};
+  const server = await createMcpServer(
+    createServerOptions({
+      reportDeliveryError: (input) => {
+        captured.deliveryId = input.deliveryId;
+        captured.leaseToken = input.leaseToken;
+        captured.status = input.status;
+        if (input.retryDelayMs !== undefined) {
+          captured.retryDelayMs = input.retryDelayMs;
+        }
+        return {
+          deliveryId: input.deliveryId,
+          status: "retry_scheduled"
+        };
+      }
+    })
+  );
+
+  try {
+    const result = await withMcpClient(server.url, (client) =>
+      client.callTool({
+        name: "report_delivery_error",
+        arguments: {
+          deliveryId: "delivery:1:agent",
+          leaseToken: "lease-123",
+          status: "retryable_error",
+          errorMessage: "Temporary failure",
+          retryDelayMs: 5000
+        }
+      })
+    );
+    const payload = result as {
+      readonly isError?: boolean;
+      readonly content?: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
+    };
+
+    assert.notEqual(payload.isError, true);
+    assert.equal(captured.deliveryId, "delivery:1:agent");
+    assert.equal(captured.leaseToken, "lease-123");
+    assert.equal(captured.status, "retryable_error");
+    assert.equal(captured.retryDelayMs, 5000);
+    assert.match(payload.content?.[0]?.text ?? "", /retry_scheduled/);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("report_delivery_error validates required fields for retryable_error", async () => {
+  const server = await createMcpServer(createServerOptions());
+
+  try {
+    const result = await withMcpClient(server.url, (client) =>
+      client.callTool({
+        name: "report_delivery_error",
+        arguments: {
+          deliveryId: "delivery:2:agent",
+          leaseToken: "lease-234",
+          status: "retryable_error"
+        }
+      })
+    );
+    const payload = result as {
+      readonly isError?: boolean;
+      readonly content?: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
+    };
+
+    assert.equal(payload.isError, true);
+    assert.match(payload.content?.[0]?.text ?? "", /retryDelayMs|errorMessage/);
   } finally {
     await server.stop();
   }
