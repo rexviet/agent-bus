@@ -913,6 +913,9 @@ test("adapter worker logs lease conflicts at warn level and returns null", async
       },
       deadLetter() {
         throw new Error("unreachable");
+      },
+      extendLease() {
+        return false;
       }
     },
     dispatcher: {} as never,

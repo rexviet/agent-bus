@@ -34,6 +34,12 @@ export interface DeadLetterDeliveryInput {
   readonly asOf?: string;
 }
 
+export interface ExtendLeaseInput {
+  readonly deliveryId: string;
+  readonly leaseToken: string;
+  readonly leaseDurationMs: number;
+}
+
 function touchRunForDelivery(
   eventStore: ReturnTypeOfCreateEventStore,
   runStore: ReturnTypeOfCreateRunStore,
@@ -87,6 +93,16 @@ export function createDeliveryService({
       touchRunForDelivery(eventStore, runStore, delivery);
 
       return delivery;
+    },
+
+    extendLease(input: ExtendLeaseInput): boolean {
+      const newExpiresAt = new Date(Date.now() + input.leaseDurationMs).toISOString();
+
+      return deliveryStore.extendLeaseDelivery({
+        deliveryId: input.deliveryId,
+        leaseToken: input.leaseToken,
+        newExpiresAt
+      });
     },
 
     reclaimExpired(asOf?: string): PersistedDeliveryRecord[] {

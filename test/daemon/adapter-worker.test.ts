@@ -535,7 +535,9 @@ artifactConventions: []
           })
         );
 
-        const firstExecution = await daemon.runWorkerIteration("worker-lease-1", 20, 0);
+        // Pass a large heartbeatIntervalMs so the heartbeat does not fire during the
+        // 150ms agent execution, letting the recovery scan reclaim the lease as intended.
+        const firstExecution = await daemon.runWorkerIteration("worker-lease-1", 20, 0, undefined, 10_000);
 
         assert.ok(firstExecution);
         assert.equal(firstExecution?.status, "process_error");

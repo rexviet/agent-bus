@@ -463,6 +463,12 @@ export function createDeliveryStore(database: DatabaseSync) {
     WHERE status = 'leased' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
     ORDER BY lease_expires_at ASC, delivery_id ASC
   `);
+  const extendLease = database.prepare(`
+    UPDATE deliveries
+    SET lease_expires_at = ?,
+        updated_at = ?
+    WHERE delivery_id = ? AND status = 'leased' AND lease_token = ?
+  `);
   const reclaimExpiredLease = database.prepare(`
     UPDATE deliveries
     SET status = 'retry_scheduled',
@@ -823,6 +829,22 @@ export function createDeliveryStore(database: DatabaseSync) {
       }
 
       return delivery;
+    },
+
+    extendLeaseDelivery(input: {
+      readonly deliveryId: string;
+      readonly leaseToken: string;
+      readonly newExpiresAt: string;
+    }): boolean {
+      const updatedAt = new Date().toISOString();
+      const result = extendLease.run(
+        input.newExpiresAt,
+        updatedAt,
+        input.deliveryId,
+        input.leaseToken
+      ) as { changes?: number };
+
+      return (result.changes ?? 0) > 0;
     },
 
     reclaimExpiredLeases(
