@@ -259,6 +259,7 @@ export function writeWorkerStartedText(
     readonly concurrency: number;
     readonly drainTimeoutMs: number;
     readonly retryDelayMs?: number;
+    readonly maxExecutionMs?: number;
     readonly mcpUrl: string;
     readonly dashboardUrl: string;
     readonly once: boolean;
@@ -274,6 +275,10 @@ export function writeWorkerStartedText(
 
   if (options.retryDelayMs !== undefined) {
     writeLine(stream, `retryDelayMs: ${options.retryDelayMs}`);
+  }
+
+  if (options.maxExecutionMs !== undefined) {
+    writeLine(stream, `maxExecutionMs: ${options.maxExecutionMs}`);
   }
 
   writeLine(stream, `mcp: ${options.mcpUrl}`);

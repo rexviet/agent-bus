@@ -127,7 +127,9 @@ export interface AgentBusDaemon {
   runWorkerIteration(
     workerId: string,
     leaseDurationMs: number,
-    retryDelayMs?: number
+    retryDelayMs?: number,
+    maxExecutionMs?: number,
+    heartbeatIntervalMs?: number
   ): Promise<AdapterWorkerExecutionResult | null>;
   getInFlightDeliveryCount(): number;
   forceKillInFlight(): void;
@@ -442,11 +444,13 @@ export async function startDaemon(
       return operatorService.listFailureDeliveries();
     },
 
-    runWorkerIteration(workerId: string, leaseDurationMs: number, retryDelayMs?: number) {
+    runWorkerIteration(workerId: string, leaseDurationMs: number, retryDelayMs?: number, maxExecutionMs?: number, heartbeatIntervalMs?: number) {
       return adapterWorker.runIteration({
         workerId,
         leaseDurationMs,
-        ...(retryDelayMs !== undefined ? { retryDelayMs } : {})
+        ...(retryDelayMs !== undefined ? { retryDelayMs } : {}),
+        ...(maxExecutionMs !== undefined ? { maxExecutionMs } : {}),
+        ...(heartbeatIntervalMs !== undefined ? { heartbeatIntervalMs } : {})
       });
     },
 

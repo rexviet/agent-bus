@@ -56,12 +56,19 @@ interface DeliveryServiceShape {
     readonly errorMessage: string;
     readonly asOf?: string;
   }): PersistedDeliveryRecord;
+  extendLease(input: {
+    readonly deliveryId: string;
+    readonly leaseToken: string;
+    readonly leaseDurationMs: number;
+  }): boolean;
 }
 
 export interface RunWorkerIterationInput {
   readonly workerId: string;
   readonly leaseDurationMs: number;
   readonly retryDelayMs?: number;
+  readonly maxExecutionMs?: number;
+  readonly heartbeatIntervalMs?: number;
   readonly asOf?: string;
 }
 
@@ -502,6 +509,8 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
         );
       }
 
+      let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+
       try {
         const event = options.eventStore.getEvent(claimedDelivery.eventId);
 
@@ -520,18 +529,45 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
         const agent = getManifestAgent(options.manifest, claimedDelivery.agentId);
         const verboseMonitor = options.verboseMonitorFactory?.(claimedDelivery.agentId);
         const monitorBase = mergeProcessMonitors(options.monitor, verboseMonitor);
+        const effectiveTimeoutMs: number | undefined =
+          input.maxExecutionMs !== undefined && agent.timeout !== undefined
+            ? Math.min(agent.timeout * 1000, input.maxExecutionMs)
+            : input.maxExecutionMs ?? (agent.timeout !== undefined ? agent.timeout * 1000 : undefined);
         const perDeliveryMonitor: ProcessMonitorCallbacks | undefined =
-          agent.timeout !== undefined
+          effectiveTimeoutMs !== undefined
             ? {
                 ...(monitorBase ?? {}),
-                timeoutMs: agent.timeout * 1000
+                timeoutMs: effectiveTimeoutMs
               }
             : monitorBase;
+        const heartbeatIntervalMs = input.heartbeatIntervalMs ?? Math.floor(input.leaseDurationMs / 3);
+        let heartbeatChildPid: number | undefined;
         const trackingMonitor: ProcessMonitorCallbacks = {
           ...(perDeliveryMonitor ?? {}),
           onStart: (info) => {
             inFlightPids.add(info.pid);
+            heartbeatChildPid = info.pid;
             perDeliveryMonitor?.onStart?.(info);
+            heartbeatTimer = setInterval(() => {
+              const renewed = options.deliveryService.extendLease({
+                deliveryId: claimedDelivery.deliveryId,
+                leaseToken,
+                leaseDurationMs: input.leaseDurationMs
+              });
+
+              if (!renewed) {
+                clearInterval(heartbeatTimer);
+                heartbeatTimer = undefined;
+                if (heartbeatChildPid !== undefined) {
+                  try {
+                    process.kill(-heartbeatChildPid, "SIGTERM");
+                  } catch {
+                    // Process may have already exited.
+                  }
+                }
+              }
+            }, heartbeatIntervalMs);
+            heartbeatTimer.unref?.();
           },
           onComplete: (info) => {
             inFlightPids.delete(info.pid);
@@ -816,6 +852,7 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
 
         return result;
       } finally {
+        clearInterval(heartbeatTimer);
         inFlightDeliveryIds.delete(claimedDelivery.deliveryId);
       }
     }

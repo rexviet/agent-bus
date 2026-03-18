@@ -26,7 +26,7 @@ export interface WorkerCommandIO {
 }
 
 const WORKER_HELP_TEXT = `Worker command:
-  agent-bus worker [--config path] [--worker-id id] [--lease-duration-ms N] [--poll-interval-ms N] [--retry-delay-ms N] [--concurrency N] [--drain-timeout-ms N] [--mcp-port N] [--dashboard-port N] [--log-level level] [--once] [--verbose]
+  agent-bus worker [--config path] [--worker-id id] [--lease-duration-ms N] [--poll-interval-ms N] [--retry-delay-ms N] [--concurrency N] [--drain-timeout-ms N] [--max-execution-ms N] [--mcp-port N] [--dashboard-port N] [--log-level level] [--once] [--verbose]
 `;
 
 interface RunWorkerCommandDependencies {
@@ -206,6 +206,7 @@ export async function runWorkerCommand(
     "--retry-delay-ms",
     "--concurrency",
     "--drain-timeout-ms",
+    "--max-execution-ms",
     "--mcp-port",
     "--dashboard-port",
     "--log-level"
@@ -254,6 +255,7 @@ export async function runWorkerCommand(
   let leaseDurationMs: number;
   let pollIntervalMs: number;
   let retryDelayMs: number | undefined;
+  let maxExecutionMs: number | undefined;
   let concurrency: number;
   let drainTimeoutMs: number;
   let mcpPort: number | undefined;
@@ -278,6 +280,12 @@ export async function runWorkerCommand(
         readOptionValue(args, "--retry-delay-ms"),
         "--retry-delay-ms",
         0
+      ) ?? undefined;
+    maxExecutionMs =
+      parseIntegerAtLeast(
+        readOptionValue(args, "--max-execution-ms"),
+        "--max-execution-ms",
+        1
       ) ?? undefined;
     concurrency =
       parseIntegerAtLeast(
@@ -347,6 +355,7 @@ export async function runWorkerCommand(
     concurrency,
     drainTimeoutMs,
     ...(retryDelayMs !== undefined ? { retryDelayMs } : {}),
+    ...(maxExecutionMs !== undefined ? { maxExecutionMs } : {}),
     mcpUrl: daemon.mcpUrl,
     dashboardUrl: daemon.dashboardUrl,
     once
@@ -385,7 +394,7 @@ export async function runWorkerCommand(
 
           return {
             started: true,
-            promise: daemon.runWorkerIteration(slotWorkerId, leaseDurationMs, retryDelayMs)
+            promise: daemon.runWorkerIteration(slotWorkerId, leaseDurationMs, retryDelayMs, maxExecutionMs)
           };
         });
 
