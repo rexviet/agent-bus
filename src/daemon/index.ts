@@ -177,6 +177,20 @@ export async function startDaemon(
   const approvalStore = createApprovalStore(database);
   const deliveryStore = createDeliveryStore(database);
   const dispatcher = createDispatcher();
+  const deliveryService = createDeliveryService({
+    deliveryStore,
+    eventStore,
+    runStore,
+    dispatcher
+  });
+  const approvalService = createApprovalService({
+    database,
+    approvalStore,
+    eventStore,
+    deliveryStore,
+    runStore,
+    dispatcher
+  });
   let mcpServer: McpServerHandle;
   let dashboardServer: DashboardServerHandle;
 
@@ -194,6 +208,35 @@ export async function startDaemon(
           envelope,
           ...(options.logger ? { logger: options.logger } : {})
         }),
+      reportDeliveryError: (input) => {
+        switch (input.status) {
+          case "retryable_error": {
+            const delivery = deliveryService.fail({
+              deliveryId: input.deliveryId,
+              leaseToken: input.leaseToken,
+              errorMessage: input.errorMessage,
+              retryDelayMs: input.retryDelayMs ?? 30_000
+            });
+            return {
+              deliveryId: delivery.deliveryId,
+              status: delivery.status
+            };
+          }
+          case "fatal_error": {
+            const delivery = deliveryService.deadLetter({
+              deliveryId: input.deliveryId,
+              leaseToken: input.leaseToken,
+              errorMessage: input.errorMessage
+            });
+            return {
+              deliveryId: delivery.deliveryId,
+              status: delivery.status
+            };
+          }
+        }
+
+        throw new Error(`Unsupported delivery error status: ${String(input.status)}`);
+      },
       ...(options.mcpPort !== undefined ? { port: options.mcpPort } : {})
     });
   } catch (error) {
@@ -201,20 +244,6 @@ export async function startDaemon(
     throw error;
   }
   options.logger?.info({ event: "mcp.started", mcpUrl: mcpServer.url });
-  const approvalService = createApprovalService({
-    database,
-    approvalStore,
-    eventStore,
-    deliveryStore,
-    runStore,
-    dispatcher
-  });
-  const deliveryService = createDeliveryService({
-    deliveryStore,
-    eventStore,
-    runStore,
-    dispatcher
-  });
   const adapterWorkerOptions: AdapterWorkerOptions = {
     database,
     manifest,

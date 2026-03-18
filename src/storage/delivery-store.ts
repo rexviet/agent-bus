@@ -465,12 +465,13 @@ export function createDeliveryStore(database: DatabaseSync) {
   `);
   const reclaimExpiredLease = database.prepare(`
     UPDATE deliveries
-    SET status = 'ready',
+    SET status = 'retry_scheduled',
         lease_token = NULL,
         lease_owner = NULL,
         lease_expires_at = NULL,
         available_at = ?,
-        updated_at = ?
+        updated_at = ?,
+        last_error = COALESCE(last_error, ?)
     WHERE delivery_id = ? AND status = 'leased'
   `);
   const deadLetterExpiredLease = database.prepare(`
@@ -848,7 +849,12 @@ export function createDeliveryStore(database: DatabaseSync) {
               row.delivery_id
             );
           } else {
-            reclaimExpiredLease.run(asOf, updatedAt, row.delivery_id);
+            reclaimExpiredLease.run(
+              asOf,
+              updatedAt,
+              "Lease expired before worker reported final delivery transition.",
+              row.delivery_id
+            );
           }
 
           reclaimedIds.push(row.delivery_id);

@@ -40,6 +40,12 @@ async function withTempRepo(
   }
 }
 
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
 function createLogCapture(): {
   readonly destination: DaemonLogDestination;
   readEntries(): Array<Record<string, unknown>>;
@@ -165,6 +171,90 @@ artifactConventions: []
             role: "input"
           }
         ]);
+      } finally {
+        await daemon.stop();
+      }
+    }
+  );
+});
+
+test("runWorkerIteration accepts agent-side delivery finalization without result envelope", async () => {
+  await withTempRepo(
+    `version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+
+agents:
+  - id: coder_open_code
+    runtime: codex
+    command: ["${process.execPath}", "${monitorFixturePath}"]
+    environment:
+      FIXTURE_DELAY_MS: "350"
+      FIXTURE_STDOUT_LINES: "agent-finalizing-via-mcp"
+
+subscriptions:
+  - agentId: coder_open_code
+    topic: implementation_ready
+
+approvalGates: []
+artifactConventions: []
+`,
+    async (configPath, repositoryRoot) => {
+      const daemon = await startDaemon({
+        configPath,
+        repositoryRoot,
+        registerSignalHandlers: false,
+        recoveryIntervalMs: 5_000
+      });
+
+      try {
+        const eventId = "550e8400-e29b-41d4-a716-446655440360";
+        daemon.publish(
+          parseEventEnvelope({
+            eventId,
+            topic: "implementation_ready",
+            runId: "run-adapter-external-finalize-001",
+            correlationId: "run-adapter-external-finalize-001",
+            dedupeKey: "implementation_ready:run-adapter-external-finalize-001",
+            occurredAt: "2026-03-10T06:20:00Z",
+            producer: {
+              agentId: "planner_codex",
+              runtime: "codex"
+            },
+            payload: {},
+            payloadMetadata: {},
+            artifactRefs: []
+          })
+        );
+
+        const externalFinalize = (async () => {
+          for (let attempt = 0; attempt < 80; attempt += 1) {
+            const delivery = daemon.listDeliveriesForEvent(eventId)[0];
+
+            if (delivery?.status === "leased" && delivery.leaseToken) {
+              daemon.acknowledgeDelivery(delivery.deliveryId, delivery.leaseToken);
+              return true;
+            }
+
+            await sleep(10);
+          }
+
+          return false;
+        })();
+
+        const execution = await daemon.runWorkerIteration(
+          "worker-external-finalize",
+          60_000
+        );
+        const finalizeSucceeded = await externalFinalize;
+
+        assert.equal(finalizeSucceeded, true);
+        assert.ok(execution);
+        assert.equal(execution?.status, "success");
+        assert.equal(execution?.delivery.status, "completed");
+        assert.equal(execution?.emittedEvents.length, 0);
       } finally {
         await daemon.stop();
       }

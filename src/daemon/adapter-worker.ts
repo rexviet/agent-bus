@@ -310,6 +310,25 @@ function finalizeLeaseBoundTransition(
   }
 }
 
+function mapExternallyFinalizedDeliveryStatus(
+  delivery: PersistedDeliveryRecord
+): AdapterWorkerExecutionResult["status"] | null {
+  const leaseExpiryError =
+    delivery.lastError?.includes("Lease expired") === true ||
+    delivery.deadLetterReason?.includes("Lease expired") === true;
+
+  switch (delivery.status) {
+    case "completed":
+      return "success";
+    case "retry_scheduled":
+      return leaseExpiryError ? null : "retryable_error";
+    case "dead_letter":
+      return leaseExpiryError ? null : "fatal_error";
+    default:
+      return null;
+  }
+}
+
 function publishEmittedEventsAndAcknowledge(
   options: Pick<
     AdapterWorkerOptions,
@@ -566,6 +585,43 @@ export function createAdapterWorker(options: AdapterWorkerOptions) {
           }),
           monitor: trackingMonitor
         });
+
+        const externallyFinalizedDelivery = currentDeliveryLostLease(
+          options.deliveryStore,
+          claimedDelivery.deliveryId,
+          leaseToken
+        );
+        const externallyFinalizedStatus = externallyFinalizedDelivery
+          ? mapExternallyFinalizedDeliveryStatus(externallyFinalizedDelivery)
+          : null;
+
+        if (externallyFinalizedDelivery && externallyFinalizedStatus) {
+          if (externallyFinalizedDelivery.status === "completed") {
+            deliveryLogger?.info({ event: "delivery.completed" });
+          } else if (externallyFinalizedDelivery.status === "retry_scheduled") {
+            deliveryLogger?.info({
+              event: "delivery.retry_scheduled",
+              errorMessage: externallyFinalizedDelivery.lastError
+            });
+          } else if (externallyFinalizedDelivery.status === "dead_letter") {
+            deliveryLogger?.error({
+              event: "delivery.dead_lettered",
+              errorMessage:
+                externallyFinalizedDelivery.deadLetterReason ??
+                externallyFinalizedDelivery.lastError
+            });
+          }
+
+          return buildWorkerExecutionResult(
+            externallyFinalizedStatus,
+            externallyFinalizedDelivery,
+            {
+              workPackagePath: processResult.workPackagePath,
+              resultFilePath: processResult.resultFilePath,
+              logFilePath: processResult.logFilePath
+            }
+          );
+        }
 
         if (!processResult.result) {
           const errorMessage =

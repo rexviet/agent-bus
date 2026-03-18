@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { z } from "zod";
 
 import {
   EventEnvelopeSchema,
@@ -18,11 +19,40 @@ export interface McpServerHandle {
 
 export interface CreateMcpServerOptions {
   readonly publishEvent: (envelope: EventEnvelope) => void;
+  readonly reportDeliveryError: (input: {
+    readonly deliveryId: string;
+    readonly leaseToken: string;
+    readonly status: "retryable_error" | "fatal_error";
+    readonly errorMessage: string;
+    readonly retryDelayMs?: number;
+  }) => {
+    readonly deliveryId: string;
+    readonly status: string;
+  };
   readonly port?: number;
 }
 
+const ReportDeliveryErrorInputSchema = z
+  .object({
+    deliveryId: z.string().min(1),
+    leaseToken: z.string().min(1),
+    status: z.enum(["retryable_error", "fatal_error"]),
+    errorMessage: z.string().min(1),
+    retryDelayMs: z.number().int().nonnegative().optional()
+  })
+  .superRefine((value, ctx) => {
+    if (value.status === "retryable_error" && value.retryDelayMs === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["retryDelayMs"],
+        message: "retryDelayMs is required for retryable_error."
+      });
+    }
+  });
+
 function createRequestScopedMcpServer(
-  publishEvent: CreateMcpServerOptions["publishEvent"]
+  publishEvent: CreateMcpServerOptions["publishEvent"],
+  reportDeliveryError: CreateMcpServerOptions["reportDeliveryError"]
 ): McpServer {
   const mcpServer = new McpServer({ name: "agent-bus", version: "1" });
 
@@ -48,6 +78,48 @@ function createRequestScopedMcpServer(
           };
         }
 
+        const message = error instanceof Error ? error.message : "Unknown error";
+
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: message }]
+        };
+      }
+    }
+  );
+
+  mcpServer.registerTool(
+    "report_delivery_error",
+    {
+      description:
+        "Report a delivery failure from the agent side using lease credentials.",
+      inputSchema: ReportDeliveryErrorInputSchema.shape
+    },
+    async (args) => {
+      try {
+        const input = ReportDeliveryErrorInputSchema.parse(args);
+        const result = reportDeliveryError({
+          deliveryId: input.deliveryId,
+          leaseToken: input.leaseToken,
+          status: input.status,
+          errorMessage: input.errorMessage,
+          ...(input.retryDelayMs !== undefined
+            ? { retryDelayMs: input.retryDelayMs }
+            : {})
+        });
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                deliveryId: result.deliveryId,
+                status: result.status
+              })
+            }
+          ]
+        };
+      } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
 
         return {
@@ -124,7 +196,10 @@ export async function createMcpServer(
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined as unknown as () => string
     });
-    const mcpServer = createRequestScopedMcpServer(options.publishEvent);
+    const mcpServer = createRequestScopedMcpServer(
+      options.publishEvent,
+      options.reportDeliveryError
+    );
 
     try {
       // SDK transport types are structurally compatible at runtime, but

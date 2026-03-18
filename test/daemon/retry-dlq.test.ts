@@ -127,7 +127,11 @@ test("delivery retries become claimable again and expired leases are reclaimed",
 
       const reclaimed = daemon.listDeliveriesForEvent(leaseToExpire.eventId)[0];
 
-      assert.equal(reclaimed?.status, "ready");
+      assert.equal(reclaimed?.status, "retry_scheduled");
+      assert.equal(
+        reclaimed?.lastError,
+        "Lease expired before worker reported final delivery transition."
+      );
       assert.equal(
         daemon.dispatcherSnapshot().filter(
           (notification) =>

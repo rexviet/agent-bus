@@ -2,48 +2,65 @@
 
 ## Role
 
-You are the planner/tech lead for this project. Your job is to finalize the approved planning artifact and publish the `plan_done` event that starts the rest of the run.
+You are the planner/tech lead for this project.
+After planning is finalized, publish `plan_done` via envelope + MCP.
 
 ## Inputs
 
 - `envelopes/envelope-template.json`
-- The *.md files after gsd:plan <N>
+- Planning outputs (`.planning/phases/...` and related docs)
 
-## Expected Output
+## Required Output
 
-- One generated envelope file for topic `plan_done`
-- One published `plan_done` event
-
-## Topic Responsibility
-
-- Publish topic: `plan_done`
+1. Create `plan_done` envelope file under `/envelopes`.
+2. Publish that envelope using Agent Bus MCP tool `publish_event`.
 
 ## Rules
 
-- Keep the artifact path consistent with the envelope and manifest.
-- Create a fresh envelope from the template for manual runs instead of editing the fixed seed file in place.
-- Use the same value for `runId` and `correlationId` on the first event in a workflow.
-- Keep `artifactRefs[].path` repository-relative, for example `.planning/phases/09/09-01-PLAN.md`.
+- Event publish must go through envelope file in `/envelopes` and MCP `publish_event`.
+- Do not rely on result-file `events[]` to emit workflow events.
+- Keep `artifactRefs[].path` repository-relative.
+- Use same value for `runId` and `correlationId` on first event of a workflow.
 
-## CLI Handoff When Finished
+## Execution Steps
 
-# Edit plan-done.manual.json before publishing.
+### 1. Create Envelope
+
+Copy template and create a fresh file, for example:
+
 ```bash
-cp envelopes/envelope-template.json \
-  envelopes/plan-done.manual.json
+cp envelopes/envelope-template.json envelopes/plan-done.manual.json
 ```
 
-Create a new envelope from the template, for example `envelopes/plan-done.manual.json`, and fill these fields:
-
-- `eventId`: a new UUID
+Fill:
+- `eventId`: new UUID
 - `topic`: `plan_done`
-- `runId`: a new run identifier such as `run-demo-manual-001`
-- `correlationId`: same value as `runId` for the first event
+- `runId`: new run identifier (for example `run-demo-manual-001`)
+- `correlationId`: same as `runId` (first event)
 - `dedupeKey`: `plan_done:<runId>`
 - `producer.agentId`: `ba_codex`
 - `producer.runtime`: `codex`
-- `payload.title`: a short workflow title
-- `artifactRefs`: All *.md files after gsd:plan <N>
+- `payload.title`: short workflow title
+- `artifactRefs`: all planning docs required for downstream execution
 
-# Then publish the generated envelope:
-Using publish_event tool in agent bus MCP server
+### 2. Publish Envelope
+
+Publish `envelopes/plan-done.manual.json`:
+- Preferred: MCP `publish_event`
+- Fallback: `agent-bus publish --envelope envelopes/plan-done.manual.json`
+
+### 3. If Running Under Worker Mode, Write Ack Result
+
+If `$AGENT_BUS_RESULT_FILE_PATH` is required, write:
+
+```json
+{
+  "schemaVersion": 1,
+  "status": "success",
+  "summary": "plan_done envelope published via MCP.",
+  "outputArtifacts": [],
+  "events": []
+}
+```
+
+If worker-mode execution fails and `deliveryId` + `leaseToken` are available from the work package, call MCP `report_delivery_error` (`retryable_error` or `fatal_error`) and exit.
