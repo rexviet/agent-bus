@@ -246,6 +246,108 @@ artifactConventions: []
   });
 });
 
+test("publish logs schema validation warning and persists event for warn-enforced topics", async () => {
+  await withTempRepo(async (configPath, repositoryRoot) => {
+    await writeFile(
+      configPath,
+      `version: 1
+workspace:
+  artifactsDir: workspace
+  stateDir: .agent-bus/state
+  logsDir: .agent-bus/logs
+
+agents:
+  - id: ba_codex
+    runtime: codex
+    command: [codex, run]
+  - id: tech_lead_claude
+    runtime: claude-code
+    command: [claude, run]
+  - id: coder_open_code
+    runtime: open-code
+    command: [open-code, run]
+
+subscriptions:
+  - agentId: tech_lead_claude
+    topic: plan_done
+  - agentId: coder_open_code
+    topic: implementation_ready
+
+schemas:
+  plan_done:
+    enforcement: warn
+    schema:
+      type: object
+      properties:
+        sequence:
+          type: integer
+      required:
+        - sequence
+      additionalProperties: false
+
+approvalGates:
+  - topic: plan_done
+    decision: manual
+    approvers: [human]
+    onReject: return_to_producer
+
+artifactConventions: []
+`,
+      "utf8"
+    );
+
+    const envelopeDir = path.join(repositoryRoot, "envelopes");
+    const envelopePath = path.join(envelopeDir, "schema-warn.json");
+
+    await mkdir(envelopeDir, { recursive: true });
+    await writeFile(
+      envelopePath,
+      JSON.stringify(
+        {
+          eventId: "550e8400-e29b-41d4-a716-446655440708",
+          topic: "plan_done",
+          runId: "run-cli-schema-warn",
+          correlationId: "run-cli-schema-warn",
+          dedupeKey: "plan_done:run-cli-schema-warn",
+          occurredAt: "2026-03-09T19:14:00Z",
+          producer: {
+            agentId: "ba_codex",
+            runtime: "codex"
+          },
+          payload: {
+            sequence: "invalid"
+          },
+          payloadMetadata: {},
+          artifactRefs: []
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const result = await runCli(
+      ["publish", "--envelope", "envelopes/schema-warn.json", "--json"],
+      repositoryRoot
+    );
+    const runDetail = await runCli(
+      ["runs", "show", "run-cli-schema-warn", "--json"],
+      repositoryRoot
+    );
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(JSON.parse(result.stdout).eventId, "550e8400-e29b-41d4-a716-446655440708");
+    assert.match(
+      result.stderr,
+      /schema\.validation_failed|Event payload failed schema validation/i
+    );
+
+    assert.equal(runDetail.exitCode, 0);
+    assert.equal(JSON.parse(runDetail.stdout).runId, "run-cli-schema-warn");
+    assert.equal(JSON.parse(runDetail.stdout).eventCount, 1);
+  });
+});
+
 test("approval mutation commands preserve actor attribution and rejection feedback", async () => {
   await withTempRepo(async (configPath, repositoryRoot) => {
     const daemon = await startDaemon({

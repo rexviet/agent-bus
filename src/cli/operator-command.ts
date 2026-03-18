@@ -2,6 +2,10 @@ import * as path from "node:path";
 
 import type { AgentBusDaemon } from "../daemon/index.js";
 import { startDaemon } from "../daemon/index.js";
+import {
+  createDaemonLogger,
+  type DaemonLogDestination
+} from "../daemon/logger.js";
 import { EventSchemaValidationError } from "../domain/schema-error.js";
 import { loadEventEnvelopeFromFile } from "./load-envelope.js";
 import {
@@ -102,12 +106,14 @@ async function withDaemon<T>(
 ): Promise<T> {
   const configPath = readOptionValue(args, "--config") ?? "agent-bus.yaml";
   const absoluteConfigPath = path.resolve(io.cwd, configPath);
+  const logger = createDaemonLogger("warn", io.stderr as DaemonLogDestination);
   const daemon = await startDaemon({
     configPath: absoluteConfigPath,
     repositoryRoot: io.cwd,
     startRecoveryScan: false,
     runRecoveryScanOnStart: false,
-    registerSignalHandlers: false
+    registerSignalHandlers: false,
+    logger
   });
 
   try {
